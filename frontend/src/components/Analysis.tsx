@@ -1,8 +1,10 @@
 import { RefreshCw } from 'lucide-react'
 import { useState, type ReactNode } from 'react'
 import { phpGap } from '../lib/php'
+import { LEVEL_NAME, type Triage } from '../lib/triage'
 import type { Analysis as A, ContainerTab, Server } from '../types'
 import { Mark } from './Mark'
+import { Tag } from './Tag'
 
 function Bar({ pct }: { pct: number }) {
   const on = Math.round(pct / 10)
@@ -17,6 +19,7 @@ function Bar({ pct }: { pct: number }) {
 
 interface Props {
   server: Server
+  triage?: Triage
   data?: A
   scanning: boolean
   error?: string
@@ -29,7 +32,7 @@ interface Props {
 }
 
 /** Read-only picture of the box, laid out like departure columns. */
-export function Analysis({ server, data, scanning, error, connected, onRescan, onExec, connection }: Props) {
+export function Analysis({ server, triage, data, scanning, error, connected, onRescan, onExec, connection }: Props) {
   const gap = phpGap(server.php, server.phpTarget)
   const [runAs, setRunAs] = useState<'default' | 'root' | 'other'>('root')
   const [other, setOther] = useState('')
@@ -48,6 +51,22 @@ export function Analysis({ server, data, scanning, error, connected, onRescan, o
       </div>
 
       {connection}
+
+      {triage && (
+        <div className="sect">
+          <h3 className="label">
+            Level {triage.level}: {LEVEL_NAME[triage.level]}
+          </h3>
+          <ul className="why">
+            {triage.findings.map((f) => (
+              <li key={f.text}>
+                <Tag level={f.level} still />
+                <span>{f.text}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
 
       {!data ? (
         <div className="sect dim">

@@ -42,6 +42,10 @@ export function DeleteVPN(arg1) {
   return window['go']['main']['App']['DeleteVPN'](arg1);
 }
 
+export function DisableLock(arg1) {
+  return window['go']['main']['App']['DisableLock'](arg1);
+}
+
 export function Disconnect(arg1) {
   return window['go']['main']['App']['Disconnect'](arg1);
 }

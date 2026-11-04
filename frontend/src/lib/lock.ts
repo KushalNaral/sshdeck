@@ -15,6 +15,8 @@ export interface LockApi {
   enable(pass: string): Promise<string[]>
   unlock(pass: string): Promise<void>
   lock(): Promise<void>
+  /** Goes back to keyring-and-plain-file storage. Needs the passphrase. */
+  disable(pass: string): Promise<void>
   change(oldPass: string, newPass: string): Promise<void>
   settings(idleMinutes: number, endOnLock: boolean): Promise<void>
   touch(): void
@@ -27,6 +29,7 @@ const wailsLock: LockApi = {
   enable: async (p) => (await App.EnableLock(p)) ?? [],
   unlock: (p) => App.Unlock(p),
   lock: () => App.Lock(),
+  disable: (p) => App.DisableLock(p),
   change: (o, n) => App.ChangePassphrase(o, n),
   settings: (i, e) => App.SetLockSettings(i, e),
   touch: () => void App.Touch(),
@@ -53,6 +56,10 @@ const mockLock: LockApi = (() => {
       if (!s.enabled) return
       s = { ...s, locked: true }
       subs.forEach((f) => f())
+    },
+    disable: async (p) => {
+      if (p !== pass) throw 'wrong passphrase, or the vault file is damaged'
+      s = { ...s, enabled: false, locked: false }
     },
     change: async (o, n) => {
       if (o !== pass) throw 'wrong passphrase, or the vault file is damaged'

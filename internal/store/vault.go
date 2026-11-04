@@ -194,3 +194,53 @@ func (s *Store) ChangePassphrase(oldPass, newPass string) error {
 	old.Zero()
 	return nil
 }
+
+// DisableLock returns to the plain setup: passwords go back into sec (the OS keyring), the data goes to
+// plainPath, and the vault file is deleted. The passphrase is checked first. The vault is removed last, so a
+// failure at any earlier step leaves it intact.
+func (s *Store) DisableLock(pass, plainPath string, sec Secrets) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	switch {
+	case !s.vaultMode:
+		return invalid("the passphrase lock is not enabled")
+	case s.locked:
+		return ErrLocked
+	}
+	blob, err := os.ReadFile(s.path)
+	if err != nil {
+		return err
+	}
+	if _, _, err := vault.Open(pass, blob); err != nil {
+		return err
+	}
+	var done []string
+	undo := func() {
+		for _, k := range done {
+			_ = sec.Delete(k)
+		}
+	}
+	for k, v := range s.d.Secrets {
+		if err := sec.Set(k, v); err != nil {
+			undo()
+			return fmt.Errorf("move %s back to the keyring: %w", k, err)
+		}
+		done = append(done, k)
+	}
+	d := s.d
+	d.Secrets = nil
+	plain, err := json.MarshalIndent(d, "", "  ")
+	if err != nil {
+		undo()
+		return err
+	}
+	if err := writeAtomic(plainPath, plain); err != nil {
+		undo()
+		return err
+	}
+	vaultPath := s.path
+	s.key.Zero()
+	s.d, s.path, s.sec, s.key, s.vaultMode = d, plainPath, sec, nil, false
+	_ = os.Remove(vaultPath)
+	return nil
+}

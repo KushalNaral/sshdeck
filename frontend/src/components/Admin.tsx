@@ -25,7 +25,7 @@ const portOk = (p: number) => Number.isInteger(p) && p >= 1 && p <= 65535
 
 const blankServer = (): Server => ({
   id: '', name: '', host: '', port: 22, user: '', auth: 'password', vpnId: null, os: '', php: '', phpTarget: '',
-  webserver: '', projects: [], stage: 0, mark: 'hollow',
+  webserver: '', projects: [], mark: 'hollow',
 })
 const blankVpn = (): Vpn => ({ id: '', name: '', kind: 'forti', gateway: '', port: 10443, user: '' })
 

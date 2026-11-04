@@ -15,6 +15,7 @@ export function SecurityPanel({ lock, onChange }: Props) {
   const [a, setA] = useState('')
   const [b, setB] = useState('')
   const [c, setC] = useState('')
+  const [off, setOff] = useState('')
   const [msg, setMsg] = useState('')
   const [err, setErr] = useState('')
   const [busy, setBusy] = useState(false)
@@ -30,6 +31,7 @@ export function SecurityPanel({ lock, onChange }: Props) {
       setA('')
       setB('')
       setC('')
+      setOff('')
     } catch (e) {
       setErr(messageOf(e))
     }
@@ -138,6 +140,28 @@ export function SecurityPanel({ lock, onChange }: Props) {
         <div className="actions">
           <button className="btn" type="submit" disabled={busy || !a || !b}>
             Change passphrase
+          </button>
+        </div>
+      </form>
+
+      <h2 className="name" style={{ marginTop: 24 }}>Turn off lock</h2>
+      <form
+        onSubmit={(e) => {
+          e.preventDefault()
+          void run(async () => {
+            await lockApi.disable(off)
+            return 'Lock is off. Passwords are back in the OS keyring and the server list is a plain file again.'
+          })
+        }}
+      >
+        <p>Moves your passwords back into the OS keyring and your server list back into a plain file. Other programs running as you can read them again.</p>
+        <label className="field">
+          <span>Passphrase</span>
+          <input type="password" autoComplete="current-password" value={off} onChange={(e) => setOff(e.target.value)} />
+        </label>
+        <div className="actions">
+          <button className="btn danger" type="submit" disabled={busy || !off}>
+            Turn off lock
           </button>
         </div>
       </form>

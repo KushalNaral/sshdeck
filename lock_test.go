@@ -186,3 +186,36 @@ func TestEnablingTheLockStartsUnlockedAndLockStateIsReported(t *testing.T) {
 		t.Error(err)
 	}
 }
+
+func TestTurningTheLockOffReturnsToThePlainSetup(t *testing.T) {
+	a, _, _, _ := lockRig(t, okOpen(newShell()))
+	ring := memSecrets{map[string]string{}}
+	a.secrets, a.plainPath = ring, filepath.Join(t.TempDir(), "data.json")
+	tr := &trail{}
+	a.audit = tr.add
+	if err := a.DisableLock("wrong"); err == nil {
+		t.Fatal("wrong passphrase accepted")
+	}
+	if err := a.DisableLock("pass"); err != nil {
+		t.Fatal(err)
+	}
+	if s := a.LockState(); s.Enabled || s.Locked {
+		t.Fatalf("state %+v", s)
+	}
+	if _, err := os.Stat(a.vaultPath); !errors.Is(err, os.ErrNotExist) {
+		t.Error("vault file still there")
+	}
+	if len(ring.m) == 0 {
+		t.Error("passwords did not return to the keyring")
+	}
+	if r := a.Connect("direct"); !r.OK {
+		t.Fatalf("connect after turning the lock off: %+v", r)
+	}
+	if tr.find("lock.disable") == nil {
+		t.Errorf("not audited:\n%s", tr.all())
+	}
+	// It can be turned on again.
+	if _, err := a.EnableLock("again"); err != nil {
+		t.Fatal(err)
+	}
+}

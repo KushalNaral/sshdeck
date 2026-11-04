@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { ConnectError } from './api'
 import { backend } from './backend'
 import { Admin } from './components/Admin'
@@ -14,7 +14,9 @@ import { Rack } from './components/Rack'
 import { TerminalPane } from './components/TerminalPane'
 import { auditApi } from './lib/audit'
 import { configStore, messageOf, type Config } from './lib/config'
+import { useNow } from './lib/now'
 import { vpnOf } from './lib/status'
+import { triage } from './lib/triage'
 import { lockApi, type LockState } from './lib/lock'
 import { applyTheme, loadTheme, THEMES } from './lib/theme'
 import type { Analysis as AnalysisData, ContainerTab, Mode, Server, Session, Task, Vpn } from './types'
@@ -31,7 +33,6 @@ export default function App() {
   const [scanning, setScanning] = useState<string | null>(null)
   const [scanErrors, setScanErrors] = useState<Record<string, string>>({})
   const [palette, setPalette] = useState(false)
-  const [light, setLight] = useState(0)
   const [ask, setAsk] = useState<{ title: string; body: string; label: string; run: () => void } | null>(null)
   const [theme, setTheme] = useState(loadTheme)
   const cycleTheme = () => {
@@ -44,6 +45,7 @@ export default function App() {
   const server = servers.find((s) => s.id === selected) ?? servers[0]
   const vpns = config.vpns
   const latest = useRef(config)
+  const now = useNow(30_000)
   const attempts = useRef<Record<string, number>>({}) // connect attempt number per server, so a cancelled attempt's late result is ignored
   latest.current = config
 
@@ -108,7 +110,6 @@ export default function App() {
       const n = (attempts.current[id] = (attempts.current[id] ?? 0) + 1)
       const current = () => attempts.current[id] === n
       setSessions((p) => ({ ...p, [id]: { serverId: id, state: 'connecting', steps: [], tabs: [], activeTab: 0, nextTab: 1 } }))
-      setLight((n) => n + 1)
       try {
         await backend.connect(sv, vpn, (steps) => current() && patch(id, (s) => ({ ...s, steps })))
         if (!current()) return
@@ -118,7 +119,6 @@ export default function App() {
         const err = e instanceof ConnectError ? e : new ConnectError('The connection failed.', 'Try again; if it keeps failing, check the credentials.')
         patch(id, (s) => ({ ...s, state: 'failed', error: { problem: err.problem, recovery: err.recovery } }))
       }
-      setLight((n) => n + 1)
     },
     [patch],
   )
@@ -250,6 +250,12 @@ export default function App() {
 
   const sess = sessions[selected]
 
+  // One ward-board level per server, from the last scan, the last connect, the PHP gap and the open tasks.
+  const levels = useMemo(() => {
+    const today = new Date(now).toLocaleDateString('en-CA')
+    return Object.fromEntries(config.servers.map((s) => [s.id, triage(s, analysis[s.id], config.tasks, sessions[s.id], today)]))
+  }, [config.servers, config.tasks, analysis, sessions, now])
+
   const failed = loadError ? <p className="bad" role="alert" style={{ padding: 24 }}>Could not load your servers: {loadError}</p> : null
   if (lock === null) return <div className="app">{failed}</div>
   if (!loaded) return <div className="app">{lock.locked ? <LockScreen onUnlock={unlock} /> : failed}</div>
@@ -257,7 +263,6 @@ export default function App() {
   return (
     <>
     <div className="app" inert={lock.locked}>
-      {light > 0 && <div key={light} className="light" aria-hidden />}
       <header className="top">
         <h1 className="brand">sshdeck</h1>
         <div className="mode" role="group" aria-label="Job">
@@ -301,7 +306,9 @@ export default function App() {
           servers={servers}
           vpns={vpns}
           sessions={sessions}
-          tasks={config.tasks}
+          analysis={analysis}
+          levels={levels}
+          now={now}
           selected={selected}
           onSelect={setSelected}
           onConnect={(id) => !sessions[id] && requestConnect(id)}
@@ -325,7 +332,7 @@ export default function App() {
             onCloseTab={closeTab}
           />
         </div>
-        <Analysis server={server} data={analysis[selected]} scanning={scanning === selected} error={scanErrors[selected]} connected={live} onExec={(c) => requestExec(selected, c)} onRescan={() => void scan(selected)} connection={<Connection server={server} vpns={vpns} session={sess} />} />
+        <Analysis server={server} triage={levels[server.id]} data={analysis[selected]} scanning={scanning === selected} error={scanErrors[selected]} connected={live} onExec={(c) => requestExec(selected, c)} onRescan={() => void scan(selected)} connection={<Connection server={server} vpns={vpns} session={sess} />} />
       </main>
       )}
 

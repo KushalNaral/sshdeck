@@ -1,0 +1,136 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-11-04T17:00:00Z",
+  "title": "Design System: sshdeck",
+  "extensions": {
+    "colorMeta": {
+      "glass-pale": {"role": "primary", "displayName": "Aero Glass", "canonical": "#eaf1fb", "tonalRamp": ["#15233a","#2f4a73","#4f72a8","#7f9db9","#a9c1e2","#b0c8e8","#d3e2f5","#eaf1fb"]},
+      "glow-azure": {"role": "primary", "displayName": "Glow Azure", "canonical": "#3399ff", "tonalRamp": ["#0b3a73","#1a5fb4","#2a7fd9","#3399ff","#66b2ff","#8fd0f6","#bee6fd","#eaf6fd"]},
+      "button-hover-sky": {"role": "secondary", "displayName": "Hover Sky", "canonical": "#bee6fd", "tonalRamp": ["#2c628b","#3c7fb1","#68b3db","#98d1ef","#a7d9f5","#bee6fd","#d9f0fc","#eaf6fd"]},
+      "select-pale": {"role": "secondary", "displayName": "Explorer Selection", "canonical": "#d3e4f8", "tonalRamp": ["#35506f","#5f87b5","#7da2ce","#b8d6fb","#d3e4f8","#e1edfa","#ebf3fd","#eef5fd"]},
+      "level-1": {"role": "tertiary", "displayName": "Level 1 Immediate", "canonical": "#d13a22", "tonalRamp": ["#8c1d0c","#b62a14","#d13a22","#e0604b","#ff8f7a","#f7b2a6","#ffd0c9","#fff0ed"]},
+      "level-2": {"role": "tertiary", "displayName": "Level 2 Very urgent", "canonical": "#ee8a22", "tonalRamp": ["#a85500","#d9740f","#ee8a22","#f59e45","#ffc27a","#ffd6a1","#ffe6c7","#fff4e6"]},
+      "level-3": {"role": "tertiary", "displayName": "Level 3 Urgent", "canonical": "#f0d02a", "tonalRamp": ["#9a8300","#e0be15","#f0d02a","#f5dc55","#fff59a","#fff8b8","#fffbd2","#fffde8"]},
+      "level-4": {"role": "tertiary", "displayName": "Level 4 Standard", "canonical": "#1a7a3a", "tonalRamp": ["#0f4a23","#1a7a3a","#3d9a5f","#6fd09a","#8fd9a3","#b5e6c3","#d3f0dc","#f4fcf6"]},
+      "level-5": {"role": "tertiary", "displayName": "Level 5 Clear", "canonical": "#1f5a99", "tonalRamp": ["#143a63","#1f5a99","#5f87b5","#7da2ce","#8bb9ee","#b7d3f3","#d9e8f9","#f3f8fe"]},
+      "pane-white": {"role": "neutral", "displayName": "Pane White", "canonical": "#ffffff", "tonalRamp": ["#1c222a","#435063","#8fa3bf","#c3cfde","#dfe6ef","#e9f0f9","#f4f7fb","#ffffff"]},
+      "console-black": {"role": "neutral", "displayName": "Console Black", "canonical": "#000000", "tonalRamp": ["#000000","#1c1c1c","#383838","#555555","#8a8a8a","#a8a8a8","#c0c0c0","#e0e0e0"]}
+    },
+    "typographyMeta": {
+      "heading": {"displayName": "Heading", "purpose": "Pane headings, 15px/600 navy."},
+      "title-lock": {"displayName": "Lock title", "purpose": "Lock screen only, 20px."},
+      "body": {"displayName": "Body", "purpose": "All running UI text, 13px."},
+      "label": {"displayName": "Label", "purpose": "Section headings, column heads, secondary lines at 12px."},
+      "tag-numeral": {"displayName": "Tag numeral", "purpose": "Level number inside the triage tag."},
+      "console": {"displayName": "Console", "purpose": "Terminal, JetBrains Mono 14px."}
+    },
+    "shadows": [
+      {"name": "button-gloss", "value": "inset 0 0 0 1px rgb(255 255 255 / 0.65)", "purpose": "Inner highlight on buttons."},
+      {"name": "default-button-halo", "value": "inset 0 0 0 1px #8fd0f6, 0 0 3px #3399ff", "purpose": "Primary and solid buttons."},
+      {"name": "glass-window", "value": "0 0 0 4px rgb(201 218 240 / 0.8), 0 10px 30px rgb(0 0 0 / 0.4)", "purpose": "Palette and confirm dialog."},
+      {"name": "lock-card", "value": "inset 0 0 0 1px rgb(255 255 255 / 0.25), 0 10px 30px rgb(0 0 0 / 0.4)", "purpose": "Lock screen glass card."}
+    ],
+    "motion": [
+      {"name": "tag-flash", "value": "480ms steps(2) 1, 3px #3399ff outline", "purpose": "A tag that changes level flashes its ring once; removed under reduced motion."}
+    ],
+    "breakpoints": [
+      {"name": "narrow", "value": "1100px"}
+    ]
+  },
+  "components": [
+    {
+      "name": "Button",
+      "kind": "button",
+      "refersTo": "button",
+      "description": "Win7 glossy grey button that turns blue on hover and press.",
+      "html": "<button class=\"ds-btn\">Connect</button>",
+      "css": ".ds-btn{height:26px;min-width:64px;padding:0 12px;border:1px solid #707070;border-radius:3px;color:#000;font:13px 'Open Sans',sans-serif;cursor:pointer;background:linear-gradient(#f2f2f2 0%,#ebebeb 49%,#ddd 50%,#cfcfcf 100%);box-shadow:inset 0 0 0 1px rgb(255 255 255 / .65)}.ds-btn:hover{background:linear-gradient(#eaf6fd 0%,#d9f0fc 49%,#bee6fd 50%,#a7d9f5 100%);border-color:#3c7fb1}.ds-btn:active{background:linear-gradient(#e5f4fc 0%,#c4e5f6 49%,#98d1ef 50%,#68b3db 100%);border-color:#2c628b;box-shadow:inset 0 0 3px rgb(0 0 0 / .25)}.ds-btn:focus-visible{outline:1px dotted #000;outline-offset:-4px}"
+    },
+    {
+      "name": "Default Button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "The primary action (Connect): blue border and azure halo.",
+      "html": "<button class=\"ds-btn-primary\">Connect</button>",
+      "css": ".ds-btn-primary{height:26px;min-width:64px;padding:0 12px;border:1px solid #3c7fb1;border-radius:3px;color:#000;font:600 13px 'Open Sans',sans-serif;cursor:pointer;background:linear-gradient(#f2f2f2 0%,#ebebeb 49%,#ddd 50%,#cfcfcf 100%);box-shadow:inset 0 0 0 1px #8fd0f6,0 0 3px #3399ff}.ds-btn-primary:hover{background:linear-gradient(#eaf6fd 0%,#d9f0fc 49%,#bee6fd 50%,#a7d9f5 100%)}.ds-btn-primary:active{background:linear-gradient(#e5f4fc 0%,#c4e5f6 49%,#98d1ef 50%,#68b3db 100%)}.ds-btn-primary:focus-visible{outline:1px dotted #000;outline-offset:-4px}"
+    },
+    {
+      "name": "Triage Tag",
+      "kind": "chip",
+      "refersTo": "triage-tag",
+      "description": "Signature level badge, 1 to 5; glossy solid for 1 to 3, pale for 4, dashed pale for 5.",
+      "html": "<span class=\"ds-tag\" data-l=\"1\">1</span> <span class=\"ds-tag\" data-l=\"2\">2</span> <span class=\"ds-tag\" data-l=\"3\">3</span> <span class=\"ds-tag\" data-l=\"4\">4</span> <span class=\"ds-tag\" data-l=\"5\">5</span>",
+      "css": ".ds-tag{display:inline-grid;place-content:center;width:26px;height:26px;border:1px solid transparent;border-radius:4px;font:700 15px/1 'Open Sans',sans-serif}.ds-tag[data-l='1']{background:linear-gradient(#ff8f7a 0%,#d13a22 50%,#b62a14 51%,#d13a22 100%);color:#fff;border-color:#8c1d0c;box-shadow:inset 0 0 0 1px rgb(255 255 255 / .45);text-shadow:0 1px 1px rgb(0 0 0 / .5)}.ds-tag[data-l='2']{background:linear-gradient(#ffc27a 0%,#ee8a22 50%,#d9740f 51%,#ee8a22 100%);color:#2b1700;border-color:#a85500;box-shadow:inset 0 0 0 1px rgb(255 255 255 / .45)}.ds-tag[data-l='3']{background:linear-gradient(#fff59a 0%,#f0d02a 50%,#e0be15 51%,#f0d02a 100%);color:#2f2800;border-color:#9a8300;box-shadow:inset 0 0 0 1px rgb(255 255 255 / .5)}.ds-tag[data-l='4']{background:linear-gradient(#f4fcf6,#d3f0dc);color:#1a7a3a;border-color:#3d9a5f}.ds-tag[data-l='5']{background:linear-gradient(#f3f8fe,#d9e8f9);color:#1f5a99;border-color:#7da2ce;border-style:dashed}"
+    },
+    {
+      "name": "Rack Row",
+      "kind": "nav",
+      "refersTo": "list-row",
+      "description": "Server row in the navigation pane with Explorer hover and selection.",
+      "html": "<div class=\"ds-pane\"><div class=\"ds-row\"><span class=\"ds-t\">1</span><span class=\"ds-name\">web-prod-01</span></div><div class=\"ds-row ds-sel\"><span class=\"ds-t\">4</span><span class=\"ds-name\">web-prod-02</span></div></div>",
+      "css": ".ds-pane{background:linear-gradient(#f7faff,#e9f0f9);border:1px solid #8fa3bf;padding:4px 0;font:13px 'Open Sans',sans-serif;width:260px}.ds-row{display:flex;align-items:center;gap:8px;margin:1px 4px;padding:5px 8px;border:1px solid transparent;border-radius:3px;cursor:pointer}.ds-row:hover{background:linear-gradient(#fafbfd,#ebf3fd);border-color:#b8d6fb}.ds-sel{background:linear-gradient(#eef5fd,#d3e4f8);border-color:#7da2ce;box-shadow:inset 0 0 0 1px rgb(255 255 255 / .55)}.ds-t{width:20px;height:20px;display:grid;place-content:center;border:1px solid #3d9a5f;border-radius:3px;background:linear-gradient(#f4fcf6,#d3f0dc);color:#1a7a3a;font-weight:700}.ds-name{font-weight:600}"
+    },
+    {
+      "name": "Text Field",
+      "kind": "input",
+      "refersTo": "input",
+      "description": "Win7 input with hover and azure focus glow.",
+      "html": "<input class=\"ds-input\" placeholder=\"Search\">",
+      "css": ".ds-input{height:26px;padding:0 8px;border:1px solid #abadb3;border-top-color:#7f8da0;background:#fff;color:#000;font:13px 'Open Sans',sans-serif}.ds-input:hover{border-color:#5794bf}.ds-input:focus-visible{outline:none;border-color:#3399ff;box-shadow:0 0 3px #3399ff}"
+    },
+    {
+      "name": "Tab Strip",
+      "kind": "nav",
+      "refersTo": "list-row",
+      "description": "Tabs on a glass command strip; selected tab white and taller.",
+      "html": "<div class=\"ds-tabs\"><button class=\"ds-tab\" aria-selected=\"true\">web-prod-01</button><button class=\"ds-tab\">web-prod-02</button></div>",
+      "css": ".ds-tabs{display:flex;gap:2px;padding:3px 3px 0;background:linear-gradient(#fbfcfe,#e5edf8);border:1px solid #b5c4da;border-bottom:0}.ds-tab{all:unset;cursor:pointer;height:26px;padding:0 12px;display:flex;align-items:center;font:13px 'Open Sans',sans-serif;border:1px solid transparent;border-bottom:0;border-radius:3px 3px 0 0}.ds-tab:hover{background:linear-gradient(#fafbfd,#ebf3fd);border-color:#b8d6fb}.ds-tab[aria-selected='true']{background:#fff;border-color:#8fa3bf;font-weight:600;height:28px}.ds-tab:focus-visible{outline:2px solid #3399ff;outline-offset:-2px}"
+    },
+    {
+      "name": "Closed Stamp",
+      "kind": "chip",
+      "refersTo": "list-row",
+      "description": "Outlined stamp marking a closed task or a production server.",
+      "html": "<span class=\"ds-stamp\">Closed</span>",
+      "css": ".ds-stamp{border:1px solid currentColor;border-radius:2px;padding:0 6px;font:700 12px/16px 'Open Sans',sans-serif;letter-spacing:.08em;text-transform:uppercase;color:#4b5563}"
+    },
+    {
+      "name": "Console",
+      "kind": "custom",
+      "refersTo": "console",
+      "description": "Classic black console with light grey monospace text.",
+      "html": "<div class=\"ds-console\">$ systemctl --failed<br>0 loaded units listed.</div>",
+      "css": ".ds-console{background:#000;color:#c0c0c0;border:1px solid #8fa3bf;padding:8px;font:14px 'JetBrains Mono Variable',monospace}"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Familiar Window",
+    "overview": "sshdeck looks like a Windows 7 Aero application and is meant to be used like one: dense, square-ish, quiet. A glass title band carries the job switch, a pale blue navigation pane lists servers like an Explorer folder tree, white content panes hold details and tasks, and the terminal is a classic black console. The user pinned this world; it replaced an earlier dealt \"Ward Triage Board\" look and kept that board's triage logic. Type is Open Sans standing in for Segoe UI, at 12 to 13px density.\n\nThe one thing the product adds is the triage tag: a numbered badge, levels 1 to 5, that says which server needs the engineer first and always sits beside a written reason. Everything else borrows from the OS the team already knows. The dark theme is the same Aero, darkened, defined by the same token names.",
+    "keyCharacteristics": [
+      "Gloss split gradients (hard step at 46 to 50%) on the band, buttons and tags; nothing else is decorative.",
+      "Dense 12/13px text on an 8px unit, 3px corners, 1px steel-blue frame lines.",
+      "Selection and hover follow Explorer: pale blue gradient plus a 1px border.",
+      "Triage level is carried by numeral, fill weight and colour together, never colour alone.",
+      "Black console with light grey text in JetBrains Mono."
+    ],
+    "rules": [
+      {"name": "The Never-Colour-Alone Rule", "body": "Triage level is numeral plus fill weight plus colour; disk and memory are cells plus a number; closed tasks are struck through plus a CLOSED stamp.", "section": "colors"},
+      {"name": "The Glow Is Focus Rule", "body": "Azure (#3399ff) means focus or \"running\", nothing else.", "section": "colors"},
+      {"name": "The Four Sizes Rule", "body": "12, 13, 15, 20px. A new size needs a reason the scale cannot answer.", "section": "typography"},
+      {"name": "The Flat Panes Rule", "body": "Panes never cast shadows; only overlays do.", "section": "elevation"}
+    ],
+    "dos": [
+      "Do define every colour through the existing tokens in `:root` and give the dark theme the same names.",
+      "Do build new interactive states from the Explorer hover and selection pairs and the button gradients.",
+      "Do give any new status a text or shape carrier alongside colour.",
+      "Do keep text at 12, 13, 15 or 20px.",
+      "Do keep the gloss split on new glass or button gradients."
+    ],
+    "donts": [
+      "Don't add flat modern SaaS treatments (large radii, soft card shadows, pill buttons); the world refuses them.",
+      "Don't put shadows on in-flow panes.",
+      "Don't use azure (#3399ff) for decoration; it means focus or running.",
+      "Don't colour triage level 4 or 5 as solid glossy badges; the fill weight is the signal."
+    ]
+  }
+}

@@ -25,6 +25,8 @@ export function DeleteTask(arg1:string):Promise<void>;
 
 export function DeleteVPN(arg1:string):Promise<void>;
 
+export function DisableLock(arg1:string):Promise<void>;
+
 export function Disconnect(arg1:string):Promise<void>;
 
 export function EnableLock(arg1:string):Promise<Array<string>>;

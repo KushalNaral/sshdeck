@@ -42,7 +42,6 @@ type Server struct {
 	PHPTarget   string   `json:"phpTarget,omitempty"`
 	Webserver   string   `json:"webserver,omitempty"`
 	Projects    []string `json:"projects,omitempty"`
-	Stage       int      `json:"stage"` // patch journey, 0..5
 	Note        string   `json:"note,omitempty"`
 }
 
@@ -263,8 +262,6 @@ func (s *Store) SaveServer(sv Server, password string) (Server, error) {
 		return sv, invalid("port must be 1-65535")
 	case sv.Auth != "password" && sv.Auth != "key":
 		return sv, invalid("auth must be password or key")
-	case sv.Stage < 0 || sv.Stage > 5:
-		return sv, invalid("stage must be 0-5")
 	case sv.VPNID != "" && s.vpnIndex(sv.VPNID) < 0:
 		return sv, invalid("unknown VPN %q", sv.VPNID)
 	}

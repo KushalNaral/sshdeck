@@ -28,15 +28,16 @@ type App struct {
 
 	// Seams so tests can run without a window or a network.
 	emit     func(name string, data ...any)
-	open     func(ctx context.Context, srv store.Server, secret string) (sshx.Session, error)
+	dial     func(ctx context.Context, srv store.Server, secret string) (sshx.Client, error)
 	lookPath func(file string) (string, error)
 
 	// audit records an event (what happened, to what, a short detail). It never gets a secret.
 	audit func(event, subject, detail string)
 	alog  *audit.Log
 
-	vaultPath, settingsPath string
-	clock                   func() time.Time // a seam for the idle timer
+	vaultPath, settingsPath, plainPath string
+	secrets                            store.Secrets    // where passwords go when the passphrase lock is turned off
+	clock                              func() time.Time // a seam for the idle timer
 
 	mu         sync.Mutex
 	settings   Settings
@@ -65,8 +66,8 @@ func NewApp() (*App, error) {
 		return nil, err
 	}
 	vpn.SweepStale(vpn.StaleDir(), time.Minute) // a killed connect can leave a config file holding a VPN password
-	a := newApp(st, vpn.New(vpn.ExecStarter{}), sshx.Open)
-	a.vaultPath, a.settingsPath = filepath.Join(base, "vault.enc"), filepath.Join(base, "settings.json")
+	a := newApp(st, vpn.New(vpn.ExecStarter{}), sshx.Dial)
+	a.vaultPath, a.settingsPath, a.plainPath = filepath.Join(base, "vault.enc"), filepath.Join(base, "settings.json"), filepath.Join(base, "data.json")
 	a.settings = loadSettings(a.settingsPath)
 	actor := "unknown"
 	if u, err := user.Current(); err == nil {
@@ -86,11 +87,11 @@ func NewApp() (*App, error) {
 	return a, nil
 }
 
-func newApp(st *store.Store, m vpn.Manager, open func(context.Context, store.Server, string) (sshx.Session, error)) *App {
+func newApp(st *store.Store, m vpn.Manager, dial func(context.Context, store.Server, string) (sshx.Client, error)) *App {
 	return &App{
-		ctx: context.Background(), st: st, vpn: m, open: open, lookPath: exec.LookPath,
+		ctx: context.Background(), st: st, vpn: m, dial: dial, lookPath: exec.LookPath,
 		emit: func(string, ...any) {}, audit: func(string, string, string) {},
-		clock: time.Now, settings: defaultSettings(), lastActive: time.Now(),
+		secrets: store.Keyring{}, clock: time.Now, settings: defaultSettings(), lastActive: time.Now(),
 		conns: map[string]*conn{}, cancels: map[string]func(){}, manual: map[string]chan struct{}{},
 	}
 }

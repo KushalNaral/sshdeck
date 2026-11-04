@@ -47,6 +47,18 @@ func (a *App) EnableLock(pass string) ([]string, error) {
 	return left, err
 }
 
+// DisableLock goes back to the plain setup (passwords in the OS keyring, data in data.json) after checking the passphrase.
+func (a *App) DisableLock(pass string) error {
+	if err := a.guard(); err != nil {
+		return err
+	}
+	if err := a.st.DisableLock(pass, a.plainPath, a.secrets); err != nil {
+		return err
+	}
+	a.audit("lock.disable", "", "")
+	return nil
+}
+
 func (a *App) Unlock(pass string) error {
 	if err := a.st.Unlock(pass); err != nil {
 		reason := err.Error()

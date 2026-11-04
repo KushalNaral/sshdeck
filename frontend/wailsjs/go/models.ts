@@ -205,7 +205,6 @@ export namespace store {
 	    phpTarget?: string;
 	    webserver?: string;
 	    projects?: string[];
-	    stage: number;
 	    note?: string;
 	
 	    static createFrom(source: any = {}) {
@@ -229,7 +228,6 @@ export namespace store {
 	        this.phpTarget = source["phpTarget"];
 	        this.webserver = source["webserver"];
 	        this.projects = source["projects"];
-	        this.stage = source["stage"];
 	        this.note = source["note"];
 	    }
 	}

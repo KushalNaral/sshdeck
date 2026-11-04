@@ -82,13 +82,12 @@ func TestPersistsAcrossReopenAndBlankPasswordKeepsOld(t *testing.T) {
 func TestValidation(t *testing.T) {
 	s, _, _ := open(t)
 	for name, mut := range map[string]func(*Server){
-		"no name":   func(x *Server) { x.Name = "" },
-		"no host":   func(x *Server) { x.Host = "" },
-		"no user":   func(x *Server) { x.User = "" },
-		"bad port":  func(x *Server) { x.Port = 70000 },
-		"bad auth":  func(x *Server) { x.Auth = "magic" },
-		"bad vpn":   func(x *Server) { x.VPNID = "nope" },
-		"bad stage": func(x *Server) { x.Stage = 9 },
+		"no name":  func(x *Server) { x.Name = "" },
+		"no host":  func(x *Server) { x.Host = "" },
+		"no user":  func(x *Server) { x.User = "" },
+		"bad port": func(x *Server) { x.Port = 70000 },
+		"bad auth": func(x *Server) { x.Auth = "magic" },
+		"bad vpn":  func(x *Server) { x.VPNID = "nope" },
 	} {
 		sv := good
 		mut(&sv)

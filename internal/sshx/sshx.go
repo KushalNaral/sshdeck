@@ -32,7 +32,8 @@ type Session interface {
 	// Output streams what the shell prints (stdout and stderr merged by the PTY).
 	// The channel is closed when the session ends, whether by Close or by the remote side.
 	Output() <-chan []byte
-	// Close ends the session and releases the connection. Safe to call twice.
+	// Close ends the session. A session from Open also closes its connection; a shell of a shared Client leaves the
+	// connection to the Client. Safe to call twice.
 	Close() error
 }
 
@@ -169,18 +170,52 @@ func dial(ctx context.Context, srv store.Server, secret string) (*ssh.Client, er
 	return ssh.NewClient(c, chans, reqs), nil
 }
 
-// Open connects to srv with the password (secret), requests a PTY and starts a shell.
-// ctx covers connecting only; it does not end the session later.
-func Open(ctx context.Context, srv store.Server, secret string) (Session, error) {
+// Client is one authenticated SSH connection that many shells and commands share. One login serves a whole
+// working session, which is faster than a login per tab or per command and keeps well under a server's login
+// rate limits (and fail2ban).
+type Client interface {
+	// Shell opens another interactive shell (its own PTY) on this connection.
+	Shell(ctx context.Context) (Session, error)
+	// Run runs one command and returns its stdout. A non-zero exit is an error that still carries what was printed.
+	// Cancelling ctx ends only this command, not the connection.
+	Run(ctx context.Context, cmd string) (string, error)
+	// Done is closed when the connection has ended, whether by Close, a keepalive failure or the server.
+	Done() <-chan struct{}
+	// Close ends the connection and every shell on it. Safe to call twice.
+	Close() error
+}
+
+type client struct {
+	c    *ssh.Client
+	done chan struct{}
+	once sync.Once
+}
+
+// Dial connects and logs in. ctx covers connecting only.
+func Dial(ctx context.Context, srv store.Server, secret string) (Client, error) {
 	c, err := dial(ctx, srv, secret)
 	if err != nil {
 		return nil, err
 	}
-	fail := func(err error) (Session, error) { c.Close(); return nil, err }
-	s, err := c.NewSession()
+	k := &client{c: c, done: make(chan struct{})}
+	go keepAlive(c, 15*time.Second, 10*time.Second, k.done, func() { k.Close() })
+	go func() { c.Wait(); k.Close() }() // the server or the network ended the connection
+	return k, nil
+}
+
+func (k *client) Done() <-chan struct{} { return k.done }
+func (k *client) Close() error {
+	k.once.Do(func() { close(k.done); k.c.Close() })
+	return nil
+}
+
+// Shell requests a PTY and starts a shell on a new channel of this connection.
+func (k *client) Shell(ctx context.Context) (Session, error) {
+	s, err := k.c.NewSession()
 	if err != nil {
-		return fail(err)
+		return nil, err
 	}
+	fail := func(err error) (Session, error) { s.Close(); return nil, err }
 	if err := s.RequestPty("xterm-256color", 24, 80, ssh.TerminalModes{ssh.ECHO: 1}); err != nil {
 		return fail(err)
 	}
@@ -195,8 +230,7 @@ func Open(ctx context.Context, srv store.Server, secret string) (Session, error)
 	if err := s.Shell(); err != nil {
 		return fail(err)
 	}
-	x := &session{c: c, s: s, in: in, out: make(chan []byte, 16), done: make(chan struct{})}
-	go keepAlive(c, 15*time.Second, 10*time.Second, x.done, func() { x.Close() })
+	x := &session{s: s, in: in, out: make(chan []byte, 16), done: make(chan struct{})}
 	go func() {
 		defer close(x.out)
 		buf := make([]byte, 32*1024)
@@ -215,6 +249,37 @@ func Open(ctx context.Context, srv store.Server, secret string) (Session, error)
 		}
 	}()
 	return x, nil
+}
+
+func (k *client) Run(ctx context.Context, cmd string) (string, error) {
+	s, err := k.c.NewSession()
+	if err != nil {
+		return "", err
+	}
+	defer s.Close()
+	stop := context.AfterFunc(ctx, func() { s.Close() }) // ctx ending unblocks a hung command, for this command only
+	defer stop()
+	out, err := s.Output(cmd)
+	if ctx.Err() != nil {
+		return string(out), ctx.Err()
+	}
+	return string(out), err
+}
+
+// Open connects to srv with the password (secret), requests a PTY and starts a shell. The returned session owns
+// its connection: closing it closes the connection. ctx covers connecting only; it does not end the session later.
+func Open(ctx context.Context, srv store.Server, secret string) (Session, error) {
+	c, err := Dial(ctx, srv, secret)
+	if err != nil {
+		return nil, err
+	}
+	sess, err := c.Shell(ctx)
+	if err != nil {
+		c.Close()
+		return nil, err
+	}
+	sess.(*session).owner = c
+	return sess, nil
 }
 
 // requester is the part of *ssh.Client that keepAlive needs.
@@ -250,40 +315,35 @@ func keepAlive(p requester, every, wait time.Duration, done <-chan struct{}, onD
 }
 
 type session struct {
-	c    *ssh.Client
-	s    *ssh.Session
-	in   interface{ Write([]byte) (int, error) }
-	out  chan []byte
-	done chan struct{}
-	once sync.Once
+	owner Client // set when the session owns its connection (Open); nil for shells of a shared Client
+	s     *ssh.Session
+	in    interface{ Write([]byte) (int, error) }
+	out   chan []byte
+	done  chan struct{}
+	once  sync.Once
 }
 
 func (x *session) Write(p []byte) error  { _, err := x.in.Write(p); return err }
 func (x *session) Resize(c, r int) error { return x.s.WindowChange(r, c) }
 func (x *session) Output() <-chan []byte { return x.out }
 func (x *session) Close() error {
-	x.once.Do(func() { close(x.done); x.s.Close(); x.c.Close() })
+	x.once.Do(func() {
+		close(x.done)
+		x.s.Close()
+		if x.owner != nil {
+			x.owner.Close()
+		}
+	})
 	return nil
 }
 
-// Run connects, runs one command and returns its stdout. A non-zero exit is an error that still
-// carries whatever was printed. Used by probe for read-only analysis.
+// Run connects, runs one command and returns its stdout, then disconnects. A non-zero exit is an error that
+// still carries whatever was printed. For several commands use Dial and Client.Run.
 func Run(ctx context.Context, srv store.Server, secret, cmd string) (string, error) {
-	c, err := dial(ctx, srv, secret)
+	c, err := Dial(ctx, srv, secret)
 	if err != nil {
 		return "", err
 	}
 	defer c.Close()
-	s, err := c.NewSession()
-	if err != nil {
-		return "", err
-	}
-	defer s.Close()
-	stop := context.AfterFunc(ctx, func() { c.Close() }) // ctx ending unblocks a hung command
-	defer stop()
-	out, err := s.Output(cmd)
-	if ctx.Err() != nil {
-		return string(out), ctx.Err()
-	}
-	return string(out), err
+	return c.Run(ctx, cmd)
 }

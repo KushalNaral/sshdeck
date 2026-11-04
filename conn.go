@@ -39,6 +39,7 @@ type shell struct {
 
 type conn struct {
 	vpnID  string
+	client sshx.Client // the one SSH login every tab and the analysis share
 	shells map[int]*shell
 }
 
@@ -166,7 +167,13 @@ func (a *App) connect(serverID string) ConnectResult {
 		set("ssh", func(s *Step) { s.Status = "fail" })
 		return fail("No password is stored for "+sv.Name+".", "Open Admin, edit the server and enter its password.")
 	}
-	sess, err := a.open(ctx, sv, pw)
+	client, err := a.dial(ctx, sv, pw)
+	var sess sshx.Session
+	if err == nil {
+		if sess, err = client.Shell(ctx); err != nil {
+			client.Close()
+		}
+	}
 	if err != nil {
 		if ctx.Err() != nil {
 			a.releaseVPN(vp)
@@ -178,7 +185,7 @@ func (a *App) connect(serverID string) ConnectResult {
 	set("ssh", func(s *Step) { s.Status, s.Ms = "done", time.Since(t).Milliseconds() })
 	set("shell", func(s *Step) { s.Status = "done" })
 
-	c := &conn{shells: map[int]*shell{1: {s: sess}}}
+	c := &conn{client: client, shells: map[int]*shell{1: {s: sess}}}
 	if vp != nil {
 		c.vpnID = vp.ID
 	}
@@ -186,6 +193,7 @@ func (a *App) connect(serverID string) ConnectResult {
 	if ctx.Err() != nil { // cancelled just as SSH finished: Disconnect cancels under this same lock
 		a.mu.Unlock()
 		sess.Close()
+		client.Close()
 		a.releaseVPN(vp)
 		return cancelled()
 	}
@@ -308,6 +316,9 @@ func (a *App) Disconnect(serverID string) {
 	for _, sh := range c.shells {
 		sh.s.Close()
 	}
+	if c.client != nil {
+		c.client.Close()
+	}
 	a.audit("disconnect", a.serverName(serverID), "")
 	if c.vpnID != "" && !inUse {
 		_ = a.vpn.Down(c.vpnID)
@@ -412,10 +423,27 @@ func (a *App) Analyze(serverID string) (probe.Report, error) {
 	}
 	ctx, cancel := context.WithTimeout(a.ctx, 90*time.Second)
 	defer cancel()
+	// Use the connection that is already open. Without one, log in once for the whole analysis, not per command.
+	a.mu.Lock()
+	var cl sshx.Client
+	if c := a.conns[serverID]; c != nil {
+		cl = c.client
+	}
+	a.mu.Unlock()
+	if cl == nil {
+		dctx, dcancel := context.WithTimeout(ctx, 20*time.Second)
+		var err error
+		cl, err = a.dial(dctx, sv, pw)
+		dcancel()
+		if err != nil {
+			return probe.Report{}, fmt.Errorf("%s is not reachable: %w", sv.Name, err)
+		}
+		defer cl.Close()
+	}
 	run := func(cmd string) (string, error) {
 		c, cancel := context.WithTimeout(ctx, 20*time.Second)
 		defer cancel()
-		return sshx.Run(c, sv, pw, cmd)
+		return cl.Run(c, cmd)
 	}
 	if _, err := run("true"); err != nil { // one quick check first, so an unreachable server fails once, not eleven times
 		return probe.Report{}, fmt.Errorf("%s is not reachable: %w", sv.Name, err)
@@ -428,6 +456,33 @@ func (a *App) Analyze(serverID string) (probe.Report, error) {
 }
 
 // ensureShell returns the shell for a tab, opening its own SSH session when the tab is new.
+// liveClient returns the connection's shared SSH client, logging in again when the link has dropped
+// (the next tab then works without a full reconnect).
+func (a *App) liveClient(ctx context.Context, c *conn, sv store.Server, pw string) (sshx.Client, error) {
+	a.mu.Lock()
+	cl := c.client
+	a.mu.Unlock()
+	if cl != nil {
+		select {
+		case <-cl.Done():
+		default:
+			return cl, nil
+		}
+	}
+	fresh, err := a.dial(ctx, sv, pw)
+	if err != nil {
+		return nil, err
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if cur := c.client; cur != nil && cur != cl { // another tab reconnected first
+		fresh.Close()
+		return cur, nil
+	}
+	c.client = fresh
+	return fresh, nil
+}
+
 func (a *App) ensureShell(serverID string, c *conn, tab int) (*shell, error) {
 	a.mu.Lock()
 	sh := c.shells[tab]
@@ -445,11 +500,23 @@ func (a *App) ensureShell(serverID string, c *conn, tab int) (*shell, error) {
 	}
 	ctx, cancel := context.WithTimeout(a.ctx, 20*time.Second)
 	defer cancel()
-	s, err := a.open(ctx, sv, pw)
+	cl, err := a.liveClient(ctx, c, sv, pw)
+	if err != nil {
+		return nil, err
+	}
+	s, err := cl.Shell(ctx)
 	if err != nil {
 		return nil, err
 	}
 	a.mu.Lock()
+	if a.conns[serverID] != c { // disconnected while the shell was opening
+		a.mu.Unlock()
+		s.Close()
+		if c.client != nil {
+			c.client.Close()
+		}
+		return nil, errors.New("not connected")
+	}
 	if cur := c.shells[tab]; cur != nil { // lost a race with another attach; keep the first
 		a.mu.Unlock()
 		s.Close()

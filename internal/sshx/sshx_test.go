@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -33,10 +34,21 @@ func TestMain(m *testing.M) {
 // testServer is an in-process SSH server: password auth, "exec" answers from a table, "shell" echoes
 // input back in upper case, and "window-change" requests are recorded.
 type testServer struct {
-	addr    string
-	keys    []ssh.PublicKey // accepted for public-key login
-	mu      sync.Mutex
-	windows [][2]uint32 // cols, rows from pty-req and window-change
+	addr     string
+	keys     []ssh.PublicKey // accepted for public-key login
+	accepted atomic.Int32    // TCP connections the server has taken
+	live     []net.Conn      // open connections, so a test can cut them
+	mu       sync.Mutex
+	windows  [][2]uint32 // cols, rows from pty-req and window-change
+}
+
+// dropAll cuts every open connection, like a network failure.
+func (ts *testServer) dropAll() {
+	ts.mu.Lock()
+	defer ts.mu.Unlock()
+	for _, c := range ts.live {
+		c.Close()
+	}
 }
 
 func (ts *testServer) authorize(k ssh.PublicKey) {
@@ -90,6 +102,10 @@ func startServer(t *testing.T) (*testServer, store.Server) {
 			if err != nil {
 				return
 			}
+			ts.accepted.Add(1)
+			ts.mu.Lock()
+			ts.live = append(ts.live, nc)
+			ts.mu.Unlock()
 			go ts.serve(nc, cfg)
 		}
 	}()

@@ -35,8 +35,6 @@ export interface Server {
   phpTarget: string
   webserver: string
   projects: string[]
-  /** Patch journey: 0 none, 1 found, 2 scheduled, 3 patched, 4 verified, 5 signed off */
-  stage: number
   mark: Exclude<Mark, 'confirmed'>
   note?: string
 }

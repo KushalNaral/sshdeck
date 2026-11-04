@@ -14,6 +14,7 @@ flowchart LR
   subgraph Go["Go process"]
     App["App bindings<br/>app.go · conn.go · deps.go"]
     Store["internal/store"]
+    Audit["internal/audit"]
     Sshx["internal/sshx"]
     Vpn["internal/vpn"]
     Probe["internal/probe"]
@@ -22,6 +23,8 @@ flowchart LR
   App -- "events (connect, term, deps)" --> UI
   App --> Store --> Keyring[("OS keyring<br/>passwords")]
   Store --> File[("~/.config/sshdeck/data.json<br/>no passwords")]
+  Store -. "passphrase lock on" .-> Vault[("vault.enc<br/>everything, encrypted")]
+  App --> Audit --> Log[("audit.log<br/>hash chained")]
   App --> Vpn --> Clients["pkexec → openfortivpn / openconnect"]
   App --> Sshx --> Servers[("SSH servers")]
   App --> Probe --> Sshx
@@ -34,11 +37,15 @@ process is in Go. The UI asks, Go acts, and Go pushes progress back as events.
 
 | Package | Job | Key types |
 |---|---|---|
-| `main`, `app.go` | Window setup, the `App` struct, lifecycle (startup, shutdown, confirm-on-close), CRUD pass-through to the store | `App` |
-| `conn.go` | Connect flow, shells and tabs, container shells, analysis entry point | `Connect`, `AttachShell`, `OpenContainerShell`, `Analyze` |
+| `main`, `app.go` | Window setup (CSP-friendly options, single instance), the `App` struct, lifecycle (startup, shutdown, confirm-on-close), CRUD pass-through to the store | `App` |
+| `conn.go` | Connect flow, shells and tabs on one shared SSH connection, container shells, analysis entry point | `Connect`, `AttachShell`, `OpenContainerShell`, `Analyze` |
+| `lock.go`, `settings.go` | Passphrase lock, idle timeout, lock settings, audit view bindings | `Lock`, `Unlock`, `EnableLock`, `DisableLock`, `ListAudit` |
+| `perm.go` | Startup check that the config directory and files are private | `checkConfigDir` |
 | `deps.go` | Check and install the programs sshdeck needs (VPN clients) | `CheckDependencies`, `InstallDependencies` |
-| `internal/store` | Server and VPN metadata in JSON; passwords in a `Secrets` backend | `Store`, `Server`, `VPN`, `Secrets`, `Keyring` |
-| `internal/sshx` | SSH login with host-key trust, an interactive PTY shell, one-shot commands | `Session`, `Open`, `Run` |
+| `internal/store` | Servers, VPN profiles and tasks; passwords in a `Secrets` backend, or everything inside the encrypted vault when the lock is on | `Store`, `Server`, `VPN`, `Task`, `Secrets`, `Keyring` |
+| `internal/vault` | Argon2id key derivation and XChaCha20-Poly1305 sealing of the vault file | `Key`, `NewKey`, `Open` |
+| `internal/audit` | Append-only, hash-chained log of what was done | `Log`, `Entry`, `Verify` |
+| `internal/sshx` | SSH login (password, key file or ssh-agent) with host-key trust and keepalive; one connection shared by many shells and commands | `Client`, `Dial`, `Session` |
 | `internal/vpn` | Start and stop VPN client processes and watch their output | `Manager`, `Starter`, `Proc`, `CertError` |
 | `internal/probe` | Run read-only commands and parse them into a report | `Analyze`, `Report`, `Run` |
 | `internal/importer` | Read the master `.ods` project list | `ReadODS`, `Projects`, `Sheet.Pairs` |
@@ -46,13 +53,16 @@ process is in Go. The UI asks, Go acts, and Go pushes progress back as events.
 
 Dependencies point one way: `main` → `store`, `sshx`, `vpn`, `probe`. `probe` takes a plain
 `func(cmd string) (string, error)`, so it knows nothing about SSH. `vpn` takes a `Starter`, so it knows nothing
-about `os/exec`. `App` takes `open` and `lookPath` functions and a `vpn.Manager`, so its flows are tested
-without a network or a window.
+about `os/exec`. `App` takes `dial` and `lookPath` functions, a `vpn.Manager` and an `audit` function, so its flows
+are tested without a network or a window.
 
 ## 3. Data and secrets
 
 ```
-~/.config/sshdeck/data.json    servers + VPN profiles       mode 0600, written atomically
+~/.config/sshdeck/data.json    servers, VPNs, tasks         mode 0600, written atomically (default setup)
+~/.config/sshdeck/vault.enc    the same plus passwords      encrypted, replaces data.json while the lock is on
+~/.config/sshdeck/settings.json lock timeout, end-on-lock   mode 0600, no secrets
+~/.config/sshdeck/audit.log    audit trail                  mode 0600, hash chained
 ~/.config/sshdeck/known_hosts  SSH host keys (first use)    mode 0600
 OS keyring, service "sshdeck"  server/<id>, vpn/<id>        passwords
 $XDG_RUNTIME_DIR/sshdeck-vpn-*.conf  openfortivpn config    0600, deleted when the attempt ends
@@ -99,8 +109,10 @@ sequenceDiagram
 
 ## 5. Terminals
 
-Each tab is its own SSH session (`sshx.Open`). Tab 1 is created by `Connect`; other tabs are created when the
-UI first attaches to them.
+A connected server has **one SSH connection** (`sshx.Dial`) that every tab and the analysis share; each tab is a
+separate PTY channel on it. Tab 1 is created by `Connect`; other tabs are created when the UI first attaches to
+them. If the link drops (keepalive fails or the server closes it), the tabs end and the next tab or Reconnect logs
+in again on a fresh connection.
 
 - Output: `AttachShell(serverId, tab, cols, rows)` starts a goroutine that forwards the session's output as
   `term:<id>:<tab>:out` events, **base64**-encoded so non-UTF-8 bytes survive. `term:<id>:<tab>:end` fires when the
@@ -156,12 +168,14 @@ no pinning is needed. Only pin a digest you have reason to trust.
 
 ## 7. SSH details
 
-- **Auth:** password only. Servers set to key login return a clear "not supported yet" error.
+- **Auth:** password, a private key file (its passphrase, if any, is the stored secret), or the running
+  ssh-agent when no key file is set.
 - **Host keys:** trust on first use, stored in `known_hosts`. A key that later changes is refused with a message
   that names the file to edit.
 - **Timeouts:** 15 s to connect; `ctx` also bounds the handshake and one-shot commands.
 - **Analysis:** `Analyze` first runs `true` (so an unreachable server fails once, not eleven times), then
-  `probe.Analyze` runs the commands listed in `internal/probe/probe.go`. Each command opens its own SSH login.
+  `probe.Analyze` runs the commands listed in `internal/probe/probe.go`, all over the server's shared connection (or
+  one short-lived login when the server is not connected).
   Every command is read-only; a test asserts nothing outside the list is run.
 
 ## 8. Frontend
@@ -170,29 +184,32 @@ React + TypeScript + Vite, Tailwind v4, xterm.js, lucide-react. The design direc
 its rules are in `PRODUCT.md` and `.impeccable/surfaces/frontend-src-app-tsx.md`.
 
 ```
-App.tsx              state: config, sessions, analysis; shortcuts; mode (Firefight / Patch / Admin)
+App.tsx              state: config, sessions, analysis; shortcuts; mode (Firefight / Tasks / Admin); lock state
 api.ts               the Backend interface, ConnectError, and the demo mockBackend
 wailsBackend.ts      Backend implemented with the Wails bindings and events
 backend.ts           picks wailsBackend inside the window, mockBackend in a plain browser
 lib/config.ts        ConfigStore: Go store inside Wails, localStorage demo data otherwise
-components/          Rack, ConnectBar, Connection, TerminalPane/Term, Analysis, PatchBoard, Palette, Admin, SystemPanel
+components/          Rack, ConnectBar, Connection, TerminalPane/Term, Analysis, TasksBoard, Palette, Admin,
+                     SystemPanel, SecurityPanel, AuditPanel, LockScreen, Confirm
+lib/                 config, lock, audit, theme, php, status
 ```
 
 Because `Backend` is an interface, `npm run dev` runs the whole UI in a normal browser against fake data, which is
 how most visual work is done. Inside `wails dev` the same components talk to Go.
 
-Three jobs share one window: **Firefight** (connect and look), **Patch** (the fleet's PHP patch journey), **Admin**
-(servers, VPN profiles, System).
+Three jobs share one window: **Firefight** (connect and look), **Tasks** (what needs doing, with tags, servers and
+due dates), **Admin** (servers, VPN profiles, System, Security, Audit).
 
 ## 9. Testing
 
 | Area | How |
 |---|---|
-| `sshx` | An in-process `x/crypto/ssh` server: exec output and exit status, wrong password, host-key change, shell echo, resize, close |
+| `sshx` | An in-process `x/crypto/ssh` server: exec output and exit status, wrong password, key and agent login, host-key change, shell echo, resize, close, one shared connection for many shells, keepalive |
+| `vault`, `audit` | Round trips, wrong passphrase, tampering, throttling; hash chain edits, rotation |
 | `vpn` | A fake `Starter` and fake processes; one test runs real `sh` processes for `ExecStarter` |
 | `probe` | Golden command outputs for Ubuntu 22.04 with Docker and CentOS 7 without |
 | `store` | Temp directory plus an in-memory `Secrets` |
-| `App` | Fakes for `open`, `lookPath`, the VPN manager and events; covers steps, Hillstone, shared VPN, shutdown, container commands, dependencies |
+| `App` | Fakes for `dial`, `lookPath`, the VPN manager, audit and events; covers steps, Hillstone, shared VPN, cancel, lock and idle, audit, shutdown, container commands, dependencies |
 | `importer` | Parsing helpers |
 | Frontend | `vitest` for pure logic (`lib/php.ts`); the UI is checked by eye in the browser |
 
@@ -249,14 +266,11 @@ memory while in use.
 
 ## 11. Known gaps
 
-- A terminal tab opens a new SSH login, so servers that cap sessions per user may refuse extra tabs.
-- Analysis opens one login per command; a shared connection would be faster.
 - VPN stop under `pkexec` and the `openfortivpn` config-file flow are unconfirmed on a real gateway beyond what is
   reported above.
 - The importer UI with a review screen is not built; the importer package reads the spreadsheet but seeding is done
   by a one-off command that is kept out of the repository because it names real clients.
 - Per-server extra credentials (database, Jenkins, cPanel, RDP).
-- There is no way to turn the passphrase lock off again from the UI.
 - `govulncheck` reports one advisory in `golang.org/x/crypto` v0.58.0 that sshdeck does not call; the fix exists only
   on an untagged commit, so upgrade when a release carries it.
 - Organisation mode (central inventory, OIDC, per-user access) is designed in [ORG-MODE.md](ORG-MODE.md), not built.

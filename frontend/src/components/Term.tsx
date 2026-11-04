@@ -28,10 +28,10 @@ export function Term({ server, tab, container, backend, visible }: Props) {
       cursorBlink: true,
       theme: {
         background: plate(),
-        foreground: '#f2efe4',
-        cursor: '#f6d27a',
-        selectionBackground: '#d9a21b',
-        selectionForeground: '#111418',
+        foreground: '#c0c0c0',
+        cursor: '#c0c0c0',
+        selectionBackground: '#c0c0c0',
+        selectionForeground: '#000000',
       },
     })
     const f = new FitAddon()

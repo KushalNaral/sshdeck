@@ -114,7 +114,87 @@ func (e *events) has(name string) bool {
 }
 
 // rig builds an App over a temp store with two direct servers, one on a shared Forti VPN pair and one Hillstone.
-func rig(t *testing.T, open func(context.Context, store.Server, string) (sshx.Session, error)) (*App, *fakeVPN, *events) {
+type openFn = func(context.Context, store.Server, string) (sshx.Session, error)
+
+// fakeClient is one shared SSH connection. Shell calls the test's open function, so existing tests that script
+// a shell keep working; Run records the command.
+type fakeClient struct {
+	mu     sync.Mutex
+	open   openFn
+	sv     store.Server
+	pw     string
+	done   chan struct{}
+	closed bool
+	dead   bool
+	shells int
+	runs   []string
+}
+
+func (f *fakeClient) Shell(ctx context.Context) (sshx.Session, error) {
+	f.mu.Lock()
+	f.shells++
+	f.mu.Unlock()
+	return f.open(ctx, f.sv, f.pw)
+}
+func (f *fakeClient) Run(_ context.Context, cmd string) (string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.runs = append(f.runs, cmd)
+	return "", nil
+}
+func (f *fakeClient) Done() <-chan struct{} { return f.done }
+func (f *fakeClient) Close() error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if !f.dead {
+		f.dead = true
+		close(f.done)
+	}
+	f.closed = true
+	return nil
+}
+
+// drop simulates the network ending the connection: Done fires, but nobody called Close.
+func (f *fakeClient) drop() {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if !f.dead {
+		f.dead = true
+		close(f.done)
+	}
+}
+
+type dialer struct {
+	mu      sync.Mutex
+	open    openFn
+	clients []*fakeClient
+	err     error
+}
+
+func (d *dialer) dial(_ context.Context, sv store.Server, pw string) (sshx.Client, error) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.err != nil {
+		return nil, d.err
+	}
+	c := &fakeClient{open: d.open, sv: sv, pw: pw, done: make(chan struct{})}
+	d.clients = append(d.clients, c)
+	return c, nil
+}
+
+func (d *dialer) count() int { d.mu.Lock(); defer d.mu.Unlock(); return len(d.clients) }
+func (d *dialer) last() *fakeClient {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.clients[len(d.clients)-1]
+}
+
+func rig(t *testing.T, open openFn) (*App, *fakeVPN, *events) {
+	a, fv, ev, _ := rigDial(t, open)
+	return a, fv, ev
+}
+
+func rigDial(t *testing.T, open openFn) (*App, *fakeVPN, *events, *dialer) {
 	t.Helper()
 	st, err := store.Open(filepath.Join(t.TempDir(), "data.json"), memSecrets{map[string]string{}})
 	if err != nil {
@@ -140,10 +220,11 @@ func rig(t *testing.T, open func(context.Context, store.Server, string) (sshx.Se
 		}
 	}
 	fv, ev := &fakeVPN{}, &events{}
-	a := newApp(st, fv, open)
+	d := &dialer{open: open}
+	a := newApp(st, fv, d.dial)
 	a.emit = ev.emit
 	a.lookPath = func(string) (string, error) { return "/bin/true", nil } // pretend the VPN clients are installed
-	return a, fv, ev
+	return a, fv, ev, d
 }
 
 func okOpen(f *fakeShell) func(context.Context, store.Server, string) (sshx.Session, error) {

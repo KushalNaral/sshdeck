@@ -111,7 +111,7 @@ export function TasksBoard({ tasks, servers, onSave, onDelete, onOpen }: Props) 
               <strong className="ttitle">{t.title}</strong>
               {t.note && <div className="dim">{t.note}</div>}
               <div className="meta">
-                <span>{LABEL[t.status]}</span>
+                {t.status === 'done' ? <span className="stamp">Closed</span> : <span>{LABEL[t.status]}</span>}
                 {t.due && <span className={late ? 'bad' : ''}>{late ? 'Overdue · ' : 'Due '}{t.due}</span>}
                 {t.serverIds.map((id) => (
                   <button key={id} onClick={() => onOpen(id)}>

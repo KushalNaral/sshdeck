@@ -5,26 +5,33 @@ primary_target: "frontend/src/App.tsx"
 related_targets: []
 ---
 
+---
+version: 1
+slug: "frontend-src-app-tsx"
+primary_target: "frontend/src/App.tsx"
+related_targets: []
+---
+
 # sshdeck app shell
 
-Scope: the whole desktop app shell (server list, terminal, analysis, fleet/patch view, connect flow, ODS import review). Mode: Operate.
+Scope: the whole desktop app shell (server rack, terminal, analysis, tasks, admin, lock, connect flow). Mode: Operate.
 
-Audience and job: support engineer plus a few teammates; two jobs about equally, Firefight (VPN then SSH then analysis) and Patch (fleet PHP campaign). Both light and dark; theme follows the OS.
+Audience and job: support engineer plus a few teammates, in a bright office by day and a dim room during night incidents; two jobs about equally, Firefight (VPN then SSH then analysis) and Tasks (what still needs doing across the fleet). Light and dark; theme follows the OS unless pinned.
 
-Unresolved: how the hard A/B job switch behaves with keyboard (proposal: Ctrl+1 / Ctrl+2); exact server state marks for Tundra, whose VPN type is unknown.
+Unresolved: how far the Aero glass goes in the dark theme (Windows 7 had none); whether Segoe UI is substituted by Open Sans where it is not installed.
 
 ## Direction contract
 
-THESIS: A 1971 pocket airline timetable on a light table. One type size everywhere; rank is carried by weight, case, reversal and a fixed-cell state mark. Refuses the cards-and-charts admin dashboard and the chrome-heavy SSH client.
+THESIS: Windows 7 (Aero), pinned by the user and overriding the dealt Ward Triage Board. A familiar, dense desktop utility: glass title band, Explorer-style navigation pane, command-bar buttons, a black console. Refuses the flat modern SaaS look and anything that reads as a toy. The triage tag stays as the product's own signature on top of it.
 
-OWN-WORLD: Lit goldenrod bed visible between raked slides of slate tinted glass; carbon, ivory, vermilion and bottle green; Bell Gothic-like text with a condensed gothic for labels (system substitutes allowed). Server groups are parallelogram slides raked 11 degrees with counter-sheared contents. State is a mark in a fixed cell: filled holds, hollow does not, vermilion strikes, green confirms. One element per screen is an opaque reversed plate: the terminal. Recognisable with all content removed by the rake, the goldenrod bed and the cell marks.
+OWN-WORLD: Aero blue glass (light-blue gradients with a hard mid-split gloss) for the title band and window frame, white content panes, a pale blue navigation pane. Segoe UI-like text (Open Sans where Segoe is absent) at Windows 7's 12 to 13px density. Buttons are the glossy grey Win7 button turning blue on hover and press; lists use the Explorer selection (pale blue gradient, 1px steel-blue border, lighter hover); scrollbars, inputs and tabs follow Windows 7. The terminal is a classic console: black ground, light grey text. Dark theme is a darker Aero variant.
 
-STORY: The user understands in a glance which servers need them and what state the path to each is in, believes the tool knows their estate, and acts: Connect, then work in the terminal. Patch day reads as a timetable of five-stage journeys.
+STORY: The engineer sees at a glance which servers need them first and why, connects, and works in the terminal as in a tool they already know. Tasks read like a file list; closed things stay, stamped CLOSED.
 
-FIRST VIEWPORT: Top strip: hard A/B switch, Firefight (A) and Patch (B), each a complete screen. Left third: VPN groups as raked slides listing servers, each with a fixed-cell state mark and a one-line sentence. Centre: the terminal as the one opaque reversed plate, widest area, Connect bar above it showing VPN then SSH steps with real durations. Right: analysis in departure-style columns (OS, PHP vs target, disk, memory, failed services, containers). Primary action: Connect, on the selected row and in the Connect bar.
+FIRST VIEWPORT: Aero glass band: job switch as command-bar buttons (Firefight, Tasks, Admin), theme, lock. Left navigation pane: VPN gates as Explorer folder headings, servers beneath ordered worst level first, each a selectable list row with a triage tag, name, PROD cell, connection mark and one line "reason, scanned Xm ago"; a strip names the first and last server in view. Centre: Connect bar with its steps, tabs, then the console. Right: details pane (OS, PHP against target, disk and memory bars, failed units, containers) with the reasons behind the level. Primary action: Connect, a Win7 default button.
 
-FORM: Timetable Slide Rack (rw-timetable-slide-rack), the lead of the bolder re-roll hand; seed key c56f2eaa, re-roll 2. Raised with the A/B job flip (from the cassette j-card) and the five-stage patch journey (from the botanical folio).
+SIGNATURE: the triage tag (levels 1 to 5, numeral plus fill weight plus colour, glossy badges for 1 to 3 and pale outlined badges for 4 and 5) computed from analysis and tasks, always with a traceable reason. A tag that changes level flashes its ring once; reduced motion removes it.
+
+FORM: Windows 7 Aero, pinned by the user; supersedes Ward Triage Board (seed key 27077afa) for the look, keeping its triage logic and raises (CLOSED stamp, state never by colour alone, guide strip, rank as live state).
 
 FINISH: unreviewed and undocumented is unfinished; this build ends with the finish review, the verdict, DESIGN.md, and every shipping raster carrying its provenance
-
-Signature interaction: the light travels along the rake bed when state changes. Motion: 90ms two-frame steps hinged at the slide edge; no easing. Reduced motion parks the light.

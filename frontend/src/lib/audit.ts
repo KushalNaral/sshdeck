@@ -65,6 +65,7 @@ export const EVENT_LABEL: Record<string, string> = {
   'task.delete': 'Task deleted',
   'production.confirm': 'Confirmed on production',
   'lock.enable': 'Lock turned on',
+  'lock.disable': 'Lock turned off',
   lock: 'Locked',
   unlock: 'Unlocked',
   'unlock.fail': 'Wrong passphrase',

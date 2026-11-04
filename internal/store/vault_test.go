@@ -203,3 +203,72 @@ func TestEnableLockTwiceAndEmptyPassphraseAreRefused(t *testing.T) {
 		t.Errorf("second enable: %v", err)
 	}
 }
+
+type failingSecrets struct{ memSecrets }
+
+func (f failingSecrets) Set(string, string) error { return errors.New("keyring is locked") }
+
+func TestDisableLockReturnsEverythingToTheKeyringSetup(t *testing.T) {
+	s, _, plainPath, vpath := plainWithData(t)
+	if _, err := s.EnableLock(vpath, "p"); err != nil {
+		t.Fatal(err)
+	}
+	ring := memSecrets{}
+	if err := s.DisableLock("p", plainPath, ring); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(vpath); !errors.Is(err, os.ErrNotExist) {
+		t.Error("vault file still exists")
+	}
+	raw, err := os.ReadFile(plainPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Contains(raw, []byte("server-pw")) || bytes.Contains(raw, []byte("secrets")) {
+		t.Error("passwords were written into data.json")
+	}
+	if st, _ := os.Stat(plainPath); st.Mode().Perm() != 0o600 {
+		t.Errorf("data.json mode %v", st.Mode().Perm())
+	}
+	if enabled, _ := s.State(); enabled {
+		t.Error("still reports the lock as enabled")
+	}
+	sv := s.Servers()[0]
+	if pw, err := s.Password("server", sv.ID); err != nil || pw != "server-pw" {
+		t.Fatalf("password after disabling: %q %v", pw, err)
+	}
+	// A fresh start sees an ordinary store.
+	s2, err := Open(plainPath, ring)
+	if err != nil || len(s2.Servers()) != 1 || len(s2.Tasks()) != 1 {
+		t.Fatalf("reopen: %v", err)
+	}
+	if pw, _ := s2.Password("vpn", s2.VPNs()[0].ID); pw != "vpn-pw" {
+		t.Errorf("vpn password %q", pw)
+	}
+}
+
+func TestDisableLockNeedsTheRightPassphraseAndKeepsTheVaultOnFailure(t *testing.T) {
+	s, _, plainPath, vpath := plainWithData(t)
+	if _, err := s.EnableLock(vpath, "p"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.DisableLock("wrong", plainPath, memSecrets{}); !errors.Is(err, vault.ErrWrongPassphrase) {
+		t.Fatalf("wrong passphrase: %v", err)
+	}
+	if err := s.DisableLock("p", plainPath, failingSecrets{memSecrets{}}); err == nil {
+		t.Fatal("a failing keyring went unnoticed")
+	}
+	if _, err := os.Stat(vpath); err != nil {
+		t.Error("the vault was removed although disabling failed")
+	}
+	if _, err := os.Stat(plainPath); !errors.Is(err, os.ErrNotExist) {
+		t.Error("data.json was written although disabling failed")
+	}
+	if enabled, _ := s.State(); !enabled {
+		t.Error("lock state changed after a failed disable")
+	}
+	s.Lock()
+	if err := s.DisableLock("p", plainPath, memSecrets{}); !errors.Is(err, ErrLocked) {
+		t.Errorf("locked store: %v", err)
+	}
+}

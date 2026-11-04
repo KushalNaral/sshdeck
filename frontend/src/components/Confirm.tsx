@@ -18,17 +18,20 @@ export function Confirm({ title, body, confirmLabel, onConfirm, onCancel }: Prop
     return () => window.removeEventListener('keydown', onKey)
   }, [onCancel])
   return (
-    <div className="lockscreen" style={{ zIndex: 900, background: 'rgb(0 0 0 / 0.55)' }} role="alertdialog" aria-modal="true" aria-label={title}>
-      <div className="lockcard">
-        <h2 className="name">{title}</h2>
-        <p>{body}</p>
-        <div className="actions">
-          <button ref={cancel} className="btn solid" onClick={onCancel}>
-            Cancel
-          </button>
-          <button className="btn danger" onClick={onConfirm}>
-            {confirmLabel}
-          </button>
+    <div className="dimmer" role="alertdialog" aria-modal="true" aria-label={title}>
+      <div className="dialog">
+        <header>sshdeck</header>
+        <div className="body">
+          <h2 className="name">{title}</h2>
+          <p>{body}</p>
+          <div className="actions" style={{ justifyContent: 'flex-end' }}>
+            <button ref={cancel} className="btn solid" onClick={onCancel}>
+              Cancel
+            </button>
+            <button className="btn danger" onClick={onConfirm}>
+              {confirmLabel}
+            </button>
+          </div>
         </div>
       </div>
     </div>
