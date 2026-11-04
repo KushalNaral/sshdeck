@@ -2,9 +2,10 @@ import { useState } from 'react'
 import { viaLabel } from '../lib/status'
 import type { Server, Vpn, VpnKind } from '../types'
 import { VPN_LABEL } from '../types'
+import { SystemPanel } from './SystemPanel'
 import { Mark } from './Mark'
 
-type Tab = 'servers' | 'vpns'
+type Tab = 'servers' | 'vpns' | 'system'
 
 interface Props {
   servers: Server[]
@@ -141,6 +142,11 @@ function VpnForm({ initial, isNew, onSave, onCancel, onDelete }: { initial: Vpn;
       <Field label="Password">
         <input type="password" autoComplete="new-password" value={pw} placeholder={isNew ? 'Stored in the OS keyring' : 'Leave blank to keep the stored password'} onChange={(e) => setPw(e.target.value)} />
       </Field>
+      {d.kind === 'forti' && (
+        <Field label="Trusted certificate (optional)">
+          <input value={d.trustedCert ?? ''} placeholder="sha256 digest; filled in when the gateway's certificate is rejected" onChange={(e) => set('trustedCert', e.target.value.trim())} />
+        </Field>
+      )}
       {d.kind === 'hillstone' && <p className="dim">Hillstone has no Linux command-line client. sshdeck will ask you to connect it yourself, then confirm.</p>}
       <Note />
       {err && <p className="bad" role="alert">{err}</p>}
@@ -176,10 +182,12 @@ export function Admin({ servers, vpns, onSaveServer, onDeleteServer, onSaveVpn, 
         <strong>Setup</strong>
         <button className="btn" aria-pressed={tab === 'servers'} onClick={() => switchTab('servers')}>Servers · {servers.length}</button>
         <button className="btn" aria-pressed={tab === 'vpns'} onClick={() => switchTab('vpns')}>VPN profiles · {vpns.length}</button>
-        <button className="btn" style={{ marginLeft: 'auto' }} onClick={() => setEditing('new')}>Add {tab === 'servers' ? 'server' : 'VPN profile'}</button>
+        <button className="btn" aria-pressed={tab === 'system'} onClick={() => switchTab('system')}>System</button>
+        {tab !== 'system' && <button className="btn" style={{ marginLeft: 'auto' }} onClick={() => setEditing('new')}>Add {tab === 'servers' ? 'server' : 'VPN profile'}</button>}
       </div>
 
-      <div className="admin-body">
+      {tab === 'system' && <SystemPanel />}
+      <div className="admin-body" hidden={tab === 'system'}>
         <div className="admin-list">
           {tab === 'servers' ? (
             <table>

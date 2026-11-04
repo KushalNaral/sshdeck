@@ -133,3 +133,16 @@ func TestChoosingAVPNClearsVPNRequired(t *testing.T) {
 		t.Fatal("VPNRequired should clear once a VPN is chosen")
 	}
 }
+
+func TestTrustedCertMustBeASha256Digest(t *testing.T) {
+	s, _ := Open(filepath.Join(t.TempDir(), "d.json"), memSecrets{})
+	v := VPN{Name: "x", Kind: Forti, Gateway: "g", Port: 1, User: "u"}
+	v.TrustedCert = "not-a-digest"
+	if _, err := s.SaveVPN(v, ""); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("want ErrInvalid, got %v", err)
+	}
+	v.TrustedCert = strings.Repeat("ab", 32)
+	if _, err := s.SaveVPN(v, ""); err != nil {
+		t.Fatal(err)
+	}
+}

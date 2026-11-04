@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=sshdeck
+Comment=SSH, VPN and server analysis
+Exec=sshdeck
+Icon=sshdeck
+Categories=Network;System;
+Terminal=false

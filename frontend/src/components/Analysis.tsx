@@ -1,7 +1,7 @@
 import { RefreshCw } from 'lucide-react'
-import type { ReactNode } from 'react'
+import { useState, type ReactNode } from 'react'
 import { phpGap } from '../lib/php'
-import type { Analysis as A, Server } from '../types'
+import type { Analysis as A, ContainerTab, Server } from '../types'
 import { Mark } from './Mark'
 
 function Bar({ pct }: { pct: number }) {
@@ -19,13 +19,24 @@ interface Props {
   server: Server
   data?: A
   scanning: boolean
+  error?: string
+  /** Whether a shell is open; a scan is only offered automatically then. */
+  connected: boolean
   onRescan: () => void
+  /** Open a shell inside a running container. */
+  onExec: (c: ContainerTab) => void
   connection?: ReactNode
 }
 
 /** Read-only picture of the box, laid out like departure columns. */
-export function Analysis({ server, data, scanning, onRescan, connection }: Props) {
+export function Analysis({ server, data, scanning, error, connected, onRescan, onExec, connection }: Props) {
   const gap = phpGap(server.php, server.phpTarget)
+  const [runAs, setRunAs] = useState<'default' | 'root' | 'other'>('root')
+  const [other, setOther] = useState('')
+  const [sudo, setSudo] = useState(false)
+  const user = runAs === 'default' ? '' : runAs === 'root' ? 'root' : other.trim()
+  const userOk = runAs !== 'other' || /^[A-Za-z0-9_.][A-Za-z0-9_.:-]*$/.test(user)
+  const memPct = data?.memTotalMb ? Math.round((data.memUsedMb / data.memTotalMb) * 100) : 0
   return (
     <aside className="pane analysis" aria-label={`Analysis of ${server.name}`}>
       <div className="sect" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -39,7 +50,17 @@ export function Analysis({ server, data, scanning, onRescan, connection }: Props
       {connection}
 
       {!data ? (
-        <div className="sect dim">{scanning ? 'Reading the server: OS, PHP, disks, services, containers.' : 'Not scanned yet.'}</div>
+        <div className="sect dim">
+          {scanning ? (
+            'Reading the server: OS, PHP, disks, services, containers.'
+          ) : error ? (
+            <span className="bad" role="alert">{error}</span>
+          ) : connected ? (
+            'Not scanned yet.'
+          ) : (
+            'Connect to read this server, or press Rescan if it is reachable.'
+          )}
+        </div>
       ) : (
         <>
           <div className="sect">
@@ -55,8 +76,8 @@ export function Analysis({ server, data, scanning, onRescan, connection }: Props
               <dd>{data.cpu} cores</dd>
               <dt>Memory</dt>
               <dd>
-                <Bar pct={Math.round((data.memUsedMb / data.memTotalMb) * 100)} />
-                {Math.round((data.memUsedMb / data.memTotalMb) * 100)}%
+                <Bar pct={memPct} />
+                {memPct}%
               </dd>
               {data.disks.map((d) => (
                 <div key={d.mount} style={{ display: 'contents' }}>
@@ -110,6 +131,22 @@ export function Analysis({ server, data, scanning, onRescan, connection }: Props
                 <Mark kind="hollow" /> Docker is not installed here
               </span>
             ) : (
+              <>
+              <div className="execbar">
+                <label>
+                  <span>Shell as</span>
+                  <select value={runAs} onChange={(e) => setRunAs(e.target.value as typeof runAs)}>
+                    <option value="root">root (admin)</option>
+                    <option value="default">Container's default user</option>
+                    <option value="other">Another user…</option>
+                  </select>
+                </label>
+                {runAs === 'other' && <input aria-label="User name or uid:gid" placeholder="www-data or 1000:1000" value={other} onChange={(e) => setOther(e.target.value)} aria-invalid={!userOk} />}
+                <label className="check">
+                  <input type="checkbox" checked={sudo} onChange={(e) => setSudo(e.target.checked)} />
+                  <span>with sudo</span>
+                </label>
+              </div>
               <table>
                 <thead>
                   <tr>
@@ -117,6 +154,7 @@ export function Analysis({ server, data, scanning, onRescan, connection }: Props
                     <th>Name</th>
                     <th>Image</th>
                     <th>Ports</th>
+                    <th />
                   </tr>
                 </thead>
                 <tbody>
@@ -128,10 +166,21 @@ export function Analysis({ server, data, scanning, onRescan, connection }: Props
                       <td>{c.name}</td>
                       <td>{c.image}</td>
                       <td>{c.ports}</td>
+                      <td>
+                        <button
+                          className="btn"
+                          disabled={!connected || c.status !== 'running' || !userOk || (runAs === 'other' && !user)}
+                          title={!connected ? 'Connect to the server first' : c.status !== 'running' ? 'The container is not running' : `Open a shell in ${c.name} as ${user || 'its default user'}`}
+                          onClick={() => onExec({ container: c.name, user, sudo })}
+                        >
+                          Shell
+                        </button>
+                      </td>
                     </tr>
                   ))}
                 </tbody>
               </table>
+              </>
             )}
           </div>
         </>

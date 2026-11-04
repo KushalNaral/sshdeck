@@ -2,16 +2,18 @@ import { FitAddon } from '@xterm/addon-fit'
 import { Terminal } from '@xterm/xterm'
 import { useEffect, useRef } from 'react'
 import type { Backend } from '../api'
-import type { Server } from '../types'
+import type { ContainerTab, Server } from '../types'
 
 interface Props {
   server: Server
+  tab: number
+  container?: ContainerTab
   backend: Backend
   visible: boolean
 }
 
 /** One xterm instance per tab. Tabs stay mounted so switching is instant. */
-export function Term({ server, backend, visible }: Props) {
+export function Term({ server, tab, container, backend, visible }: Props) {
   const host = useRef<HTMLDivElement>(null)
   const term = useRef<Terminal | null>(null)
   const fit = useRef<FitAddon | null>(null)
@@ -35,30 +37,33 @@ export function Term({ server, backend, visible }: Props) {
     t.open(host.current!)
     term.current = t
     fit.current = f
-    const prompt = `\x1b[32m${server.user}@${server.name.toLowerCase().replace(/\s+/g, '-')}\x1b[0m:~$ `
-    t.write(`Last login: today from your desk\r\n(demo shell: try uptime, php -v, df -h, free -m, docker ps, systemctl --failed)\r\n${prompt}`)
-    let line = ''
-    t.onData((d) => {
-      if (d === '\r') {
-        t.write('\r\n' + backend.exec(server, line) + prompt)
-        line = ''
-      } else if (d === '\x7f') {
-        if (line) {
-          line = line.slice(0, -1)
-          t.write('\b \b')
-        }
-      } else if (d >= ' ') {
-        line += d
-        t.write(d)
-      }
-    })
+    let live = true
+    let detach = () => {}
+    f.fit()
+    ;(container ? backend.openContainer(server.id, tab, container.container, container.user, container.sudo) : Promise.resolve())
+      .then(() => backend.attach(
+        server.id,
+        tab,
+        { cols: t.cols, rows: t.rows },
+        (d) => live && t.write(d),
+        () => live && t.write('\r\n\x1b[2m[session closed]\x1b[0m\r\n'),
+      ))
+      .then((off) => (live ? (detach = off) : off()))
+      .catch((e) => live && t.write(`\r\n\x1b[31m${e instanceof Error ? e.message : String(e)}\x1b[0m\r\n`))
+    t.onData((d) => backend.write(server.id, tab, d))
+    t.onResize(({ cols, rows }) => backend.resize(server.id, tab, cols, rows))
     const ro = new ResizeObserver(() => host.current?.offsetParent && f.fit())
     ro.observe(host.current!)
     return () => {
+      live = false
+      detach()
+      backend.closeShell(server.id, tab)
       ro.disconnect()
       t.dispose()
     }
-  }, [server, backend])
+    // server.id, not server: editing a server's details must not tear down its open shell.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [server.id, tab, backend])
 
   useEffect(() => {
     if (visible) {

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { ConnectError, mockBackend as backend } from './api'
+import { ConnectError } from './api'
+import { backend } from './backend'
 import { Admin } from './components/Admin'
 import { Connection } from './components/Connection'
 import { Mark } from './components/Mark'
@@ -11,7 +12,7 @@ import { Rack } from './components/Rack'
 import { TerminalPane } from './components/TerminalPane'
 import { configStore, messageOf, type Config } from './lib/config'
 import { vpnOf } from './lib/status'
-import type { Analysis as AnalysisData, Mode, Server, Session, Vpn } from './types'
+import type { Analysis as AnalysisData, ContainerTab, Mode, Server, Session, Vpn } from './types'
 
 export default function App() {
   const [mode, setMode] = useState<Mode>('firefight')
@@ -22,6 +23,7 @@ export default function App() {
   const [sessions, setSessions] = useState<Record<string, Session>>({})
   const [analysis, setAnalysis] = useState<Record<string, AnalysisData>>({})
   const [scanning, setScanning] = useState<string | null>(null)
+  const [scanErrors, setScanErrors] = useState<Record<string, string>>({})
   const [palette, setPalette] = useState(false)
   const [light, setLight] = useState(0)
 
@@ -64,14 +66,17 @@ export default function App() {
     [patch],
   )
 
-  const disconnect = (id: string) =>
+  const disconnect = (id: string) => {
+    backend.disconnect(id)
     setSessions((p) => {
       const { [id]: _, ...rest } = p
       return rest
     })
+  }
 
   const addTab = useCallback(
-    (id: string) => patch(id, (s) => ({ ...s, tabs: [...s.tabs, s.nextTab], activeTab: s.nextTab, nextTab: s.nextTab + 1 })),
+    (id: string, info?: ContainerTab) =>
+      patch(id, (s) => ({ ...s, tabs: [...s.tabs, s.nextTab], activeTab: s.nextTab, nextTab: s.nextTab + 1, tabInfo: info ? { ...s.tabInfo, [s.nextTab]: info } : s.tabInfo })),
     [patch],
   )
   const closeTab = (id: string, tab: number) =>
@@ -82,14 +87,21 @@ export default function App() {
 
   const scan = useCallback(async (id: string) => {
     setScanning(id)
-    const data = await backend.analyze(latest.current.servers.find((s) => s.id === id)!)
-    setAnalysis((p) => ({ ...p, [id]: data }))
+    setScanErrors((p) => ({ ...p, [id]: '' }))
+    try {
+      const data = await backend.analyze(latest.current.servers.find((s) => s.id === id)!)
+      setAnalysis((p) => ({ ...p, [id]: data }))
+    } catch (e) {
+      setScanErrors((p) => ({ ...p, [id]: messageOf(e) }))
+    }
     setScanning((cur) => (cur === id ? null : cur))
   }, [])
 
+  // Scan on its own only for a server with an open shell: a scan logs in, and the others may be behind a VPN that is down.
+  const live = sessions[selected]?.state === 'live'
   useEffect(() => {
-    if (!analysis[selected] && scanning !== selected) void scan(selected)
-  }, [selected, analysis, scanning, scan])
+    if (live && !analysis[selected] && !scanErrors[selected] && scanning !== selected) void scan(selected)
+  }, [live, selected, analysis, scanErrors, scanning, scan])
 
   // Each returns an error message for the form to show, or null on success.
   const attempt = async (fn: () => Promise<void>) => {
@@ -215,7 +227,7 @@ export default function App() {
             onCloseTab={closeTab}
           />
         </div>
-        <Analysis server={server} data={analysis[selected]} scanning={scanning === selected} onRescan={() => void scan(selected)} connection={<Connection server={server} vpns={vpns} session={sess} />} />
+        <Analysis server={server} data={analysis[selected]} scanning={scanning === selected} error={scanErrors[selected]} connected={live} onExec={(c) => addTab(selected, c)} onRescan={() => void scan(selected)} connection={<Connection server={server} vpns={vpns} session={sess} />} />
       </main>
       )}
 

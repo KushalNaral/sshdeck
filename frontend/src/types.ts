@@ -9,6 +9,8 @@ export interface Vpn {
   port: number
   user: string
   note?: string
+  /** sha256 of a gateway certificate to accept (FortiClient gateways with a self-signed certificate). */
+  trustedCert?: string
 }
 
 // One cell of the fixed-cell state mark: filled holds, hollow does not, struck is a problem, confirmed is live.
@@ -71,6 +73,21 @@ export interface Step {
 
 export type SessionState = 'connecting' | 'live' | 'failed'
 
+/** A tab that runs inside a container instead of the server's own shell. */
+export interface ContainerTab {
+  container: string
+  /** '' is the container's default user; 'root' is the admin user. */
+  user: string
+  sudo: boolean
+}
+
+export interface Dep {
+  name: string
+  purpose: string
+  installed: boolean
+  installable: boolean
+}
+
 export interface Session {
   serverId: string
   state: SessionState
@@ -78,6 +95,7 @@ export interface Session {
   tabs: number[]
   activeTab: number
   nextTab: number
+  tabInfo?: Record<number, ContainerTab>
   since?: number
   error?: { problem: string; recovery: string }
 }

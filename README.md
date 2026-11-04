@@ -13,4 +13,6 @@ go test ./...                   # Go tests
 cd frontend && npm test         # UI logic tests
 ```
 
+How it fits together: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+
 Server and VPN metadata live in `~/.config/sshdeck/data.json` (mode 0600). Passwords live only in the OS keyring.

@@ -1,0 +1,420 @@
+package main
+
+import (
+	"context"
+	"encoding/base64"
+	"errors"
+	"fmt"
+	"regexp"
+	"strings"
+	"time"
+
+	"github.com/KushalNaral/sshdeck/internal/probe"
+	"github.com/KushalNaral/sshdeck/internal/sshx"
+	"github.com/KushalNaral/sshdeck/internal/store"
+	"github.com/KushalNaral/sshdeck/internal/vpn"
+)
+
+// Step is one stage of connecting, sent to the UI as it changes.
+type Step struct {
+	Key    string `json:"key"` // vpn, ssh, shell
+	Label  string `json:"label"`
+	Status string `json:"status"` // wait, run, manual, done, fail
+	Ms     int64  `json:"ms,omitempty"`
+	Detail string `json:"detail,omitempty"`
+}
+
+// ConnectResult says how Connect ended. A failure is data, not an error, so the UI can show problem and recovery.
+type ConnectResult struct {
+	OK       bool   `json:"ok"`
+	Problem  string `json:"problem,omitempty"`
+	Recovery string `json:"recovery,omitempty"`
+}
+
+type shell struct {
+	s      sshx.Session
+	pumped bool
+}
+
+type conn struct {
+	vpnID  string
+	shells map[int]*shell
+}
+
+func fail(problem, recovery string) ConnectResult {
+	return ConnectResult{Problem: problem, Recovery: recovery}
+}
+
+func (a *App) server(id string) (store.Server, bool) {
+	for _, s := range a.st.Servers() {
+		if s.ID == id {
+			return s, true
+		}
+	}
+	return store.Server{}, false
+}
+
+// Connect brings the VPN up if the server needs one, logs in over SSH and holds the first shell open.
+// Progress arrives as "connect:<serverId>" events carrying the Step list.
+func (a *App) Connect(serverID string) ConnectResult {
+	sv, ok := a.server(serverID)
+	if !ok {
+		return fail("That server no longer exists.", "Pick another server.")
+	}
+	a.mu.Lock()
+	if a.conns[serverID] != nil {
+		a.mu.Unlock()
+		return ConnectResult{OK: true}
+	}
+	if a.cancels[serverID] != nil {
+		a.mu.Unlock()
+		return fail("Already connecting to "+sv.Name+".", "Wait for it to finish, or disconnect first.")
+	}
+	ctx, cancel := context.WithCancel(a.ctx)
+	a.cancels[serverID] = cancel
+	a.mu.Unlock()
+	defer func() {
+		cancel()
+		a.mu.Lock()
+		delete(a.cancels, serverID)
+		a.mu.Unlock()
+	}()
+
+	var vp *store.VPN
+	for _, v := range a.st.VPNs() {
+		if v.ID == sv.VPNID && sv.VPNID != "" {
+			v := v
+			vp = &v
+		}
+	}
+	var steps []Step
+	if vp != nil || sv.VPNRequired {
+		d := "not set"
+		if vp != nil {
+			d = vp.Name
+		}
+		steps = append(steps, Step{Key: "vpn", Label: "VPN", Status: "wait", Detail: d})
+	}
+	steps = append(steps,
+		Step{Key: "ssh", Label: "SSH", Status: "wait", Detail: fmt.Sprintf("%s@%s:%d", sv.User, sv.Host, sv.Port)},
+		Step{Key: "shell", Label: "Shell", Status: "wait"})
+	set := func(key string, patch func(*Step)) {
+		for i := range steps {
+			if steps[i].Key == key {
+				patch(&steps[i])
+			}
+		}
+		a.emit("connect:"+serverID, append([]Step(nil), steps...))
+	}
+	a.emit("connect:"+serverID, append([]Step(nil), steps...))
+
+	switch {
+	case vp == nil && sv.VPNRequired:
+		set("vpn", func(s *Step) { s.Status = "fail" })
+		return fail(sv.Name+" needs a VPN, but no VPN is set.", "Choose its VPN in Admin, then connect again.")
+	case vp != nil && vp.Kind == store.Hillstone:
+		ch := make(chan struct{}, 1)
+		a.mu.Lock()
+		a.manual[serverID] = ch
+		a.mu.Unlock()
+		t := time.Now()
+		set("vpn", func(s *Step) { s.Status = "manual" })
+		select {
+		case <-ch:
+			set("vpn", func(s *Step) { s.Status, s.Ms = "done", time.Since(t).Milliseconds() })
+		case <-ctx.Done():
+			return fail("Cancelled.", "Connect again when the VPN is ready.")
+		}
+	case vp != nil:
+		if res, bad := a.vpnUp(ctx, *vp, set); bad {
+			return res
+		}
+	}
+
+	t := time.Now()
+	set("ssh", func(s *Step) { s.Status = "run" })
+	pw, err := a.st.Password("server", sv.ID)
+	if err != nil {
+		set("ssh", func(s *Step) { s.Status = "fail" })
+		return fail("No password is stored for "+sv.Name+".", "Open Admin, edit the server and enter its password.")
+	}
+	sess, err := a.open(ctx, sv, pw)
+	if err != nil {
+		set("ssh", func(s *Step) { s.Status = "fail" })
+		return sshFailure(err)
+	}
+	set("ssh", func(s *Step) { s.Status, s.Ms = "done", time.Since(t).Milliseconds() })
+	set("shell", func(s *Step) { s.Status = "done" })
+
+	c := &conn{shells: map[int]*shell{1: {s: sess}}}
+	if vp != nil {
+		c.vpnID = vp.ID
+	}
+	a.mu.Lock()
+	a.conns[serverID] = c
+	a.mu.Unlock()
+	return ConnectResult{OK: true}
+}
+
+func (a *App) vpnUp(ctx context.Context, v store.VPN, set func(string, func(*Step))) (ConnectResult, bool) {
+	tool := map[store.VPNKind]string{store.Forti: "openfortivpn", store.GP: "openconnect"}[v.Kind]
+	if _, err := a.lookPath(tool); err != nil {
+		set("vpn", func(s *Step) { s.Status = "fail" })
+		return fail(tool+" is not installed, so "+v.Name+" cannot start.", "Open Admin, System, and install it. Then connect again."), true
+	}
+	pw, err := a.st.Password("vpn", v.ID)
+	if err != nil {
+		set("vpn", func(s *Step) { s.Status = "fail" })
+		return fail("No password is stored for the VPN "+v.Name+".", "Open Admin, edit the VPN profile and enter its password."), true
+	}
+	t := time.Now()
+	set("vpn", func(s *Step) { s.Status = "run" })
+	upCtx, cancel := context.WithTimeout(ctx, 60*time.Second)
+	defer cancel()
+	if err := a.vpn.Up(upCtx, v, pw); err != nil {
+		set("vpn", func(s *Step) { s.Status = "fail" })
+		recovery := "Check the VPN user, password and gateway in Admin, then connect again."
+		if errors.Is(err, context.Canceled) {
+			return fail("Cancelled.", "Connect again when you are ready."), true
+		}
+		var ce *vpn.CertError
+		if errors.As(err, &ce) {
+			return fail(v.Name+" presented a certificate this computer does not trust.",
+				"If you trust this gateway, open Admin, VPN profiles, edit "+v.Name+" and paste this into Trusted certificate: "+ce.Digest), true
+		}
+		return fail(fmt.Sprintf("%s did not come up: %v", v.Name, err), recovery), true
+	}
+	set("vpn", func(s *Step) { s.Status, s.Ms = "done", time.Since(t).Milliseconds() })
+	return ConnectResult{}, false
+}
+
+// sshFailure turns an sshx error into the problem and recovery the UI shows.
+func sshFailure(err error) ConnectResult {
+	msg := err.Error()
+	switch {
+	case strings.Contains(msg, "wrong user or password"):
+		return fail("The server refused the login: wrong user or password.", "Fix the user or password in Admin, then connect again.")
+	case strings.Contains(msg, "cannot reach"):
+		return fail("The server cannot be reached. "+msg, "Check the host and port, and that the VPN is up.")
+	case strings.Contains(msg, "host key"):
+		return fail(msg, "If the server was rebuilt on purpose, remove its line from the known_hosts file.")
+	}
+	return fail("SSH failed: "+msg, "Try again; if it keeps failing, check the server in Admin.")
+}
+
+// ConfirmManualVPN tells a waiting Hillstone connect that the user has connected the VPN themselves.
+func (a *App) ConfirmManualVPN(serverID string) {
+	a.mu.Lock()
+	ch := a.manual[serverID]
+	delete(a.manual, serverID)
+	a.mu.Unlock()
+	if ch != nil {
+		ch <- struct{}{}
+	}
+}
+
+// Disconnect stops a connect in flight, closes every shell and takes the VPN down when nothing else uses it.
+func (a *App) Disconnect(serverID string) {
+	a.mu.Lock()
+	if cancel := a.cancels[serverID]; cancel != nil {
+		cancel()
+	}
+	delete(a.manual, serverID)
+	c := a.conns[serverID]
+	delete(a.conns, serverID)
+	inUse := false
+	if c != nil {
+		for _, o := range a.conns {
+			if o.vpnID == c.vpnID {
+				inUse = true
+			}
+		}
+	}
+	a.mu.Unlock()
+	if c == nil {
+		return
+	}
+	for _, sh := range c.shells {
+		sh.s.Close()
+	}
+	if c.vpnID != "" && !inUse {
+		_ = a.vpn.Down(c.vpnID)
+	}
+}
+
+func shellEvent(serverID string, tab int, kind string) string {
+	return fmt.Sprintf("term:%s:%d:%s", serverID, tab, kind)
+}
+
+// AttachShell starts streaming a shell's output as "term:<serverId>:<tab>:out" events (base64) and sets its size.
+// Tab 1 already exists from Connect; any other tab is opened here. Call it after subscribing to the events.
+func (a *App) AttachShell(serverID string, tab, cols, rows int) error {
+	a.mu.Lock()
+	c := a.conns[serverID]
+	a.mu.Unlock()
+	if c == nil {
+		return errors.New("not connected")
+	}
+	sh, err := a.ensureShell(serverID, c, tab)
+	if err != nil {
+		return err
+	}
+	_ = sh.s.Resize(cols, rows)
+	a.mu.Lock()
+	start := !sh.pumped
+	sh.pumped = true
+	a.mu.Unlock()
+	if start { // a remount of the same tab reuses the running stream: events are keyed by name
+		go func() {
+			for b := range sh.s.Output() {
+				a.emit(shellEvent(serverID, tab, "out"), base64.StdEncoding.EncodeToString(b))
+			}
+			a.mu.Lock()
+			if c.shells[tab] == sh {
+				delete(c.shells, tab)
+			}
+			a.mu.Unlock()
+			a.emit(shellEvent(serverID, tab, "end"))
+		}()
+	}
+	return nil
+}
+
+func (a *App) shell(serverID string, tab int) *shell {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if c := a.conns[serverID]; c != nil {
+		return c.shells[tab]
+	}
+	return nil
+}
+
+func (a *App) TermWrite(serverID string, tab int, data string) {
+	if sh := a.shell(serverID, tab); sh != nil {
+		_ = sh.s.Write([]byte(data))
+	}
+}
+
+func (a *App) TermResize(serverID string, tab, cols, rows int) {
+	if sh := a.shell(serverID, tab); sh != nil {
+		_ = sh.s.Resize(cols, rows)
+	}
+}
+
+func (a *App) CloseShell(serverID string, tab int) {
+	a.mu.Lock()
+	var sh *shell
+	if c := a.conns[serverID]; c != nil {
+		sh = c.shells[tab]
+		delete(c.shells, tab)
+	}
+	a.mu.Unlock()
+	if sh != nil {
+		sh.s.Close()
+	}
+}
+
+// Analyze runs the read-only probe commands on a server. The server must be reachable (VPN up if it needs one).
+func (a *App) Analyze(serverID string) (probe.Report, error) {
+	sv, ok := a.server(serverID)
+	if !ok {
+		return probe.Report{}, errors.New("that server no longer exists")
+	}
+	pw, err := a.st.Password("server", sv.ID)
+	if err != nil {
+		return probe.Report{}, errors.New("no password is stored for " + sv.Name)
+	}
+	ctx, cancel := context.WithTimeout(a.ctx, 90*time.Second)
+	defer cancel()
+	run := func(cmd string) (string, error) {
+		c, cancel := context.WithTimeout(ctx, 20*time.Second)
+		defer cancel()
+		return sshx.Run(c, sv, pw, cmd)
+	}
+	if _, err := run("true"); err != nil { // one quick check first, so an unreachable server fails once, not eleven times
+		return probe.Report{}, fmt.Errorf("%s is not reachable: %w", sv.Name, err)
+	}
+	r, err := probe.Analyze(ctx, run)
+	if err != nil {
+		return r, fmt.Errorf("%s could not be analysed: %w", sv.Name, err)
+	}
+	return r, nil
+}
+
+// ensureShell returns the shell for a tab, opening its own SSH session when the tab is new.
+func (a *App) ensureShell(serverID string, c *conn, tab int) (*shell, error) {
+	a.mu.Lock()
+	sh := c.shells[tab]
+	a.mu.Unlock()
+	if sh != nil {
+		return sh, nil
+	}
+	sv, ok := a.server(serverID)
+	if !ok {
+		return nil, errors.New("that server no longer exists")
+	}
+	pw, err := a.st.Password("server", sv.ID)
+	if err != nil {
+		return nil, err
+	}
+	ctx, cancel := context.WithTimeout(a.ctx, 20*time.Second)
+	defer cancel()
+	s, err := a.open(ctx, sv, pw)
+	if err != nil {
+		return nil, err
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if cur := c.shells[tab]; cur != nil { // lost a race with another attach; keep the first
+		s.Close()
+		return cur, nil
+	}
+	sh = &shell{s: s}
+	c.shells[tab] = sh
+	return sh, nil
+}
+
+var (
+	containerRe = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.-]*$`)
+	userRe      = regexp.MustCompile(`^[A-Za-z0-9_.][A-Za-z0-9_.:-]*$`)
+)
+
+// dockerExec builds the command typed into a fresh shell. Names are checked first, so nothing here can
+// carry shell syntax. exec replaces the login shell, so leaving the container ends the tab.
+func dockerExec(container, user string, sudo bool) (string, error) {
+	if !containerRe.MatchString(container) {
+		return "", fmt.Errorf("%q is not a valid container name", container)
+	}
+	if user != "" && !userRe.MatchString(user) {
+		return "", fmt.Errorf("%q is not a valid user (use a name, or uid:gid)", user)
+	}
+	cmd := "exec "
+	if sudo {
+		cmd += "sudo "
+	}
+	cmd += "docker exec -it "
+	if user != "" {
+		cmd += "-u " + user + " "
+	}
+	return cmd + container + " sh -c 'command -v bash >/dev/null 2>&1 && exec bash || exec sh'\n", nil
+}
+
+// OpenContainerShell opens tab as an SSH session that drops straight into a running container.
+// user "" means the container's default user; "root" is the admin user. Then call AttachShell for the tab.
+func (a *App) OpenContainerShell(serverID string, tab int, container, user string, sudo bool) error {
+	line, err := dockerExec(container, user, sudo)
+	if err != nil {
+		return err
+	}
+	a.mu.Lock()
+	c := a.conns[serverID]
+	a.mu.Unlock()
+	if c == nil {
+		return errors.New("not connected")
+	}
+	sh, err := a.ensureShell(serverID, c, tab)
+	if err != nil {
+		return err
+	}
+	return sh.s.Write([]byte(line))
+}

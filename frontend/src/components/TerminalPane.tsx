@@ -22,7 +22,7 @@ export function TerminalPane({ servers, sessions, selected, backend, onTab, onAd
         {cur?.state === 'live' &&
           cur.tabs.map((t) => (
             <button key={t} role="tab" aria-selected={cur.activeTab === t} onClick={() => onTab(selected, t)}>
-              <span>Shell {t}</span>
+              <span>{cur.tabInfo?.[t] ? `${cur.tabInfo[t].container} · ${cur.tabInfo[t].user || 'default user'}` : `Shell ${t}`}</span>
               {cur.tabs.length > 1 && (
                 <span
                   role="button"
@@ -46,7 +46,7 @@ export function TerminalPane({ servers, sessions, selected, backend, onTab, onAd
       <div className="plate" role="region" aria-label="Terminal">
         {live.flatMap((s) => {
           const server = servers.find((x) => x.id === s.serverId)!
-          return s.tabs.map((t) => <Term key={`${s.serverId}-${t}`} server={server} backend={backend} visible={s.serverId === selected && s.activeTab === t} />)
+          return s.tabs.map((t) => <Term key={`${s.serverId}-${t}`} server={server} tab={t} container={s.tabInfo?.[t]} backend={backend} visible={s.serverId === selected && s.activeTab === t} />)
         })}
         {cur?.state !== 'live' && (
           <div className="empty">

@@ -49,6 +49,8 @@ type VPN struct {
 	Port    int     `json:"port"`
 	User    string  `json:"user"`
 	Note    string  `json:"note,omitempty"`
+	// TrustedCert is the sha256 of the gateway certificate to accept (FortiClient gateways with a self-signed certificate).
+	TrustedCert string `json:"trustedCert,omitempty"`
 }
 
 // Secrets stores passwords by key. Keys look like "server/<id>" and "vpn/<id>".
@@ -114,6 +116,8 @@ func (s *Store) VPNs() []VPN {
 func (s *Store) Password(kind, id string) (string, error) {
 	return s.sec.Get(kind + "/" + id)
 }
+
+var certRe = regexp.MustCompile(`^[0-9a-fA-F]{64}$`)
 
 var slugRe = regexp.MustCompile(`[^a-z0-9]+`)
 
@@ -195,6 +199,8 @@ func (s *Store) SaveVPN(v VPN, password string) (VPN, error) {
 		return v, invalid("port must be 1-65535")
 	case v.Kind != Forti && v.Kind != GP && v.Kind != Hillstone:
 		return v, invalid("unknown VPN client %q", v.Kind)
+	case v.TrustedCert != "" && !certRe.MatchString(v.TrustedCert):
+		return v, invalid("trusted certificate must be a 64-character sha256 hex digest")
 	}
 	if v.ID == "" {
 		v.ID = newID(v.Name)

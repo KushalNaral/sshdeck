@@ -738,3 +738,49 @@ td {
     display: none;
   }
 }
+
+.execbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--u);
+  align-items: center;
+  margin-bottom: var(--u);
+}
+
+.execbar label {
+  display: flex;
+  gap: var(--u);
+  align-items: center;
+}
+
+.execbar select,
+.execbar input:not([type='checkbox']) {
+  box-sizing: border-box;
+  height: calc(var(--u) * 3.5);
+  padding: 0 var(--u);
+  border: 1px solid var(--line);
+  background: var(--pane);
+  color: var(--ink);
+  font: inherit;
+  min-width: 0;
+}
+
+.execbar select option {
+  background: var(--pane);
+  color: var(--ink);
+}
+
+.execbar input[aria-invalid='true'] {
+  border-color: var(--bad, currentColor);
+}
+
+.deplog {
+  max-height: 240px;
+  overflow: auto;
+  margin: var(--u) 0 0;
+  padding: var(--u);
+  border: 1px solid var(--line);
+  font: inherit;
+  white-space: pre-wrap;
+  color: var(--dim);
+}

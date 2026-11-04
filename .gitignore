@@ -9,3 +9,4 @@ build/bin/
 .impeccable/serve*
 .impeccable/questions/
 frontend/package.json.md5
+dist/

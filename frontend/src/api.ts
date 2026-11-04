@@ -1,11 +1,21 @@
-import type { Analysis, Server, Step, Vpn } from './types'
+import type { Analysis, Dep, Server, Step, Vpn } from './types'
 
 /** Everything the UI needs from the Go side. The Wails bindings will implement this same shape. */
 export interface Backend {
   connect(server: Server, vpn: Vpn | undefined, onSteps: (steps: Step[]) => void): Promise<void>
   confirmManualVpn(serverId: string): void
+  disconnect(serverId: string): void
   analyze(server: Server): Promise<Analysis>
-  exec(server: Server, line: string): string
+  /** Start a shell's output flowing into onData. Resolves with a function that stops listening. Rejects if the shell cannot open. */
+  attach(serverId: string, tab: number, size: { cols: number; rows: number }, onData: (d: string | Uint8Array) => void, onEnd: () => void): Promise<() => void>
+  write(serverId: string, tab: number, data: string): void
+  resize(serverId: string, tab: number, cols: number, rows: number): void
+  closeShell(serverId: string, tab: number): void
+  /** Make a tab an SSH session that drops into a running container. Call attach for it afterwards. */
+  openContainer(serverId: string, tab: number, container: string, user: string, sudo: boolean): Promise<void>
+  deps(): Promise<Dep[]>
+  /** Installs through the system package manager; the log streams into onLog. Rejects if it fails. */
+  installDeps(names: string[], onLog: (line: string) => void): Promise<void>
 }
 
 export class ConnectError extends Error {
@@ -58,6 +68,7 @@ const manual = new Map<string, () => void>()
 
 export const mockBackend: Backend = {
   async connect(server, vpn, onSteps) {
+    demoServers.set(server.id, server)
     const steps: Step[] = []
     if (vpn || server.vpnRequired) steps.push({ key: 'vpn', label: 'VPN', status: 'wait', detail: vpn?.name ?? 'not set' })
     steps.push({ key: 'ssh', label: 'SSH', status: 'wait', detail: `${server.user}@${server.host}:${server.port}` }, { key: 'shell', label: 'Shell', status: 'wait' })
@@ -93,7 +104,63 @@ export const mockBackend: Backend = {
     await sleep(700)
     return makeAnalysis(server)
   },
-  exec(server, line) {
+  disconnect: () => {},
+  async attach(serverId, tab, _size, onData) {
+    const server = demoServers.get(serverId)!
+    const inBox = containerTabs.get(`${serverId}:${tab}`)
+    const prompt = inBox ? `root@${inBox}:/# ` : promptFor(server)
+    shells.set(`${serverId}:${tab}`, { server, onData: onData as (d: string) => void, line: '' })
+    onData(`Last login: today from your desk\r\n(demo shell: try uptime, php -v, df -h, free -m, docker ps, systemctl --failed)\r\n${prompt}`)
+    return () => {}
+  },
+  write(serverId, tab, d) {
+    const sh = shells.get(`${serverId}:${tab}`)
+    if (!sh) return
+    if (d === '\r') {
+      sh.onData('\r\n' + runDemo(sh.server, sh.line) + promptFor(sh.server))
+      sh.line = ''
+    } else if (d === '\x7f') {
+      if (sh.line) {
+        sh.line = sh.line.slice(0, -1)
+        sh.onData('\b \b')
+      }
+    } else if (d >= ' ') {
+      sh.line += d
+      sh.onData(d)
+    }
+  },
+  resize: () => {},
+  closeShell: (serverId, tab) => void shells.delete(`${serverId}:${tab}`),
+  async openContainer(serverId, tab, container) {
+    containerTabs.set(`${serverId}:${tab}`, container)
+  },
+  async deps() {
+    return demoDeps.map((d) => ({ ...d }))
+  },
+  async installDeps(names, onLog) {
+    for (const n of names) {
+      onLog(`Reading package lists... Done`)
+      await sleep(500)
+      onLog(`Setting up ${n} ...`)
+      await sleep(500)
+      const d = demoDeps.find((x) => x.name === n)
+      if (d) d.installed = true
+    }
+  },
+}
+
+const containerTabs = new Map<string, string>()
+const demoDeps: Dep[] = [
+  { name: 'openfortivpn', purpose: 'FortiClient VPN (HQ old, Quartz Reports)', installed: false, installable: true },
+  { name: 'openconnect', purpose: 'GlobalProtect VPN (HQ, Portal)', installed: true, installable: true },
+  { name: 'pkexec', purpose: 'Asks for your admin password to start a VPN (part of polkit)', installed: true, installable: false },
+]
+
+const demoServers = new Map<string, Server>()
+const shells = new Map<string, { server: Server; onData: (d: string) => void; line: string }>()
+const promptFor = (s: Server) => `\x1b[32m${s.user}@${s.name.toLowerCase().replace(/\s+/g, '-')}\x1b[0m:~$ `
+
+function runDemo(server: Server, line: string): string {
     const a = makeAnalysis(server)
     const cmd = line.trim()
     const out = (s: string) => s.replace(/\n/g, '\r\n') + '\r\n'
@@ -106,5 +173,4 @@ export const mockBackend: Backend = {
     if (cmd === 'docker ps') return out(a.containers ? 'NAMES         IMAGE          STATUS\n' + a.containers.map((c) => `${c.name.padEnd(13)} ${c.image.padEnd(14)} ${c.status}`).join('\n') : 'bash: docker: command not found')
     if (cmd === 'ls') return out('app  releases  shared  storage')
     return out(`bash: ${cmd.split(' ')[0]}: command not found (demo shell)`)
-  },
 }
