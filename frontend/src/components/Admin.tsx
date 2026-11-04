@@ -73,6 +73,16 @@ function ServerForm({ initial, vpns, isNew, onSave, onCancel, onDelete }: { init
           <input type="password" autoComplete="new-password" value={pw} placeholder={isNew ? 'Stored in the OS keyring' : 'Leave blank to keep the stored password'} onChange={(e) => setPw(e.target.value)} />
         </Field>
       )}
+      {d.auth === 'key' && (
+        <>
+          <Field label="Key file">
+            <input value={d.keyPath ?? ''} placeholder="~/.ssh/id_ed25519, or leave empty to use ssh-agent" onChange={(e) => set('keyPath', e.target.value)} />
+          </Field>
+          <Field label="Key passphrase">
+            <input type="password" autoComplete="new-password" value={pw} placeholder={isNew ? 'Only if the key has one. Stored in the OS keyring' : 'Leave blank to keep the stored passphrase'} onChange={(e) => setPw(e.target.value)} />
+          </Field>
+        </>
+      )}
       <Field label="Reached through">
         <select
           value={d.vpnId ?? (d.vpnRequired ? '__req' : '')}

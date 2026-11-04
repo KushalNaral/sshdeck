@@ -135,6 +135,7 @@ export namespace store {
 	    port: number;
 	    user: string;
 	    auth: string;
+	    keyPath?: string;
 	    vpnId: string;
 	    vpnRequired?: boolean;
 	    os?: string;
@@ -157,6 +158,7 @@ export namespace store {
 	        this.port = source["port"];
 	        this.user = source["user"];
 	        this.auth = source["auth"];
+	        this.keyPath = source["keyPath"];
 	        this.vpnId = source["vpnId"];
 	        this.vpnRequired = source["vpnRequired"];
 	        this.os = source["os"];
@@ -166,6 +168,34 @@ export namespace store {
 	        this.projects = source["projects"];
 	        this.stage = source["stage"];
 	        this.note = source["note"];
+	    }
+	}
+	export class Task {
+	    id: string;
+	    title: string;
+	    note?: string;
+	    status: string;
+	    tags: string[];
+	    serverIds: string[];
+	    due?: string;
+	    created: number;
+	    updated: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new Task(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.title = source["title"];
+	        this.note = source["note"];
+	        this.status = source["status"];
+	        this.tags = source["tags"];
+	        this.serverIds = source["serverIds"];
+	        this.due = source["due"];
+	        this.created = source["created"];
+	        this.updated = source["updated"];
 	    }
 	}
 	export class VPN {

@@ -414,3 +414,116 @@ func TestUntrustedGatewayCertificateTellsTheUserWhatToPaste(t *testing.T) {
 		t.Fatalf("%+v", r)
 	}
 }
+
+func waitFor(t *testing.T, ch <-chan struct{}) {
+	t.Helper()
+	select {
+	case <-ch:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out")
+	}
+}
+
+func TestCancelWhileSSHIsConnectingTakesTheVPNDown(t *testing.T) {
+	started := make(chan struct{})
+	a, fv, _ := rig(t, func(ctx context.Context, _ store.Server, _ string) (sshx.Session, error) {
+		close(started)
+		<-ctx.Done()
+		return nil, ctx.Err()
+	})
+	done := make(chan ConnectResult, 1)
+	go func() { done <- a.Connect("a") }()
+	waitFor(t, started)
+	a.Disconnect("a")
+	r := <-done
+	if r.OK || r.Problem != "Cancelled." {
+		t.Fatalf("%+v", r)
+	}
+	if len(fv.down) != 1 || fv.down[0] != "f" {
+		t.Fatalf("a VPN started for a cancelled connect must come down: %v", fv.down)
+	}
+	if a.conns["a"] != nil {
+		t.Error("cancelled connect left a connection")
+	}
+}
+
+func TestCancelThatLosesTheRaceStillLeavesNothingBehind(t *testing.T) {
+	started, release := make(chan struct{}), make(chan struct{})
+	sh := newShell()
+	a, fv, _ := rig(t, func(context.Context, store.Server, string) (sshx.Session, error) {
+		close(started)
+		<-release // SSH finishes after the user pressed Cancel
+		return sh, nil
+	})
+	done := make(chan ConnectResult, 1)
+	go func() { done <- a.Connect("a") }()
+	waitFor(t, started)
+	a.Disconnect("a")
+	close(release)
+	if r := <-done; r.OK {
+		t.Fatalf("%+v", r)
+	}
+	sh.mu.Lock()
+	closed := sh.closed
+	sh.mu.Unlock()
+	if !closed || a.conns["a"] != nil || len(fv.down) != 1 {
+		t.Fatalf("shell closed=%v conn=%v vpn down=%v", closed, a.conns["a"], fv.down)
+	}
+}
+
+func TestCancelKeepsAVPNAnotherServerIsUsing(t *testing.T) {
+	started := make(chan struct{})
+	n := 0
+	a, fv, _ := rig(t, func(ctx context.Context, _ store.Server, _ string) (sshx.Session, error) {
+		if n++; n == 1 {
+			return newShell(), nil
+		}
+		close(started)
+		<-ctx.Done()
+		return nil, ctx.Err()
+	})
+	if r := a.Connect("a"); !r.OK {
+		t.Fatalf("%+v", r)
+	}
+	done := make(chan ConnectResult, 1)
+	go func() { done <- a.Connect("b") }()
+	waitFor(t, started)
+	a.Disconnect("b")
+	<-done
+	if len(fv.down) != 0 {
+		t.Fatalf("VPN taken down while A still uses it: %v", fv.down)
+	}
+}
+
+func TestKeyLoginServerNeedsNoStoredPassword(t *testing.T) {
+	var got string
+	a, _, _ := rig(t, func(_ context.Context, sv store.Server, pw string) (sshx.Session, error) {
+		got = sv.Auth + ":" + sv.KeyPath + ":" + pw
+		return newShell(), nil
+	})
+	if _, err := a.SaveServer(store.Server{ID: "k", Name: "K", Host: "h", Port: 22, User: "u", Auth: "key", KeyPath: "~/.ssh/id_ed25519"}, ""); err != nil {
+		t.Fatal(err)
+	}
+	if r := a.Connect("k"); !r.OK {
+		t.Fatalf("%+v", r)
+	}
+	if got != "key:~/.ssh/id_ed25519:" {
+		t.Fatalf("open got %q", got)
+	}
+	if _, err := a.Analyze("k"); err != nil && strings.Contains(err.Error(), "no password") {
+		t.Fatalf("analysis demanded a password for a key server: %v", err)
+	}
+}
+
+func TestRejectedKeyIsExplained(t *testing.T) {
+	a, _, _ := rig(t, func(context.Context, store.Server, string) (sshx.Session, error) {
+		return nil, errors.New("login to h:22 as u failed: the server did not accept the key: ssh: unable to authenticate")
+	})
+	if _, err := a.SaveServer(store.Server{ID: "k", Name: "K", Host: "h", Port: 22, User: "u", Auth: "key"}, ""); err != nil {
+		t.Fatal(err)
+	}
+	r := a.Connect("k")
+	if r.OK || !strings.Contains(r.Problem, "key") || !strings.Contains(r.Recovery, "authorized_keys") {
+		t.Fatalf("%+v", r)
+	}
+}

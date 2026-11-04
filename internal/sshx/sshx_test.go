@@ -34,8 +34,15 @@ func TestMain(m *testing.M) {
 // input back in upper case, and "window-change" requests are recorded.
 type testServer struct {
 	addr    string
+	keys    []ssh.PublicKey // accepted for public-key login
 	mu      sync.Mutex
 	windows [][2]uint32 // cols, rows from pty-req and window-change
+}
+
+func (ts *testServer) authorize(k ssh.PublicKey) {
+	ts.mu.Lock()
+	defer ts.mu.Unlock()
+	ts.keys = append(ts.keys, k)
 }
 
 func (ts *testServer) lastWindow() [2]uint32 {
@@ -54,7 +61,17 @@ func startServer(t *testing.T) (*testServer, store.Server) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	cfg := &ssh.ServerConfig{PasswordCallback: func(c ssh.ConnMetadata, pw []byte) (*ssh.Permissions, error) {
+	ts := &testServer{}
+	cfg := &ssh.ServerConfig{PublicKeyCallback: func(c ssh.ConnMetadata, k ssh.PublicKey) (*ssh.Permissions, error) {
+		ts.mu.Lock()
+		defer ts.mu.Unlock()
+		for _, ok := range ts.keys {
+			if c.User() == "deploy" && bytes.Equal(ok.Marshal(), k.Marshal()) {
+				return nil, nil
+			}
+		}
+		return nil, ssh.ErrNoAuth
+	}, PasswordCallback: func(c ssh.ConnMetadata, pw []byte) (*ssh.Permissions, error) {
 		if c.User() == "deploy" && string(pw) == goodPassword {
 			return nil, nil
 		}
@@ -66,7 +83,7 @@ func startServer(t *testing.T) (*testServer, store.Server) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { ln.Close() })
-	ts := &testServer{addr: ln.Addr().String()}
+	ts.addr = ln.Addr().String()
 	go func() {
 		for {
 			nc, err := ln.Accept()

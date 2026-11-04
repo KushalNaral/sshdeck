@@ -30,6 +30,10 @@ export function DeleteServer(arg1) {
   return window['go']['main']['App']['DeleteServer'](arg1);
 }
 
+export function DeleteTask(arg1) {
+  return window['go']['main']['App']['DeleteTask'](arg1);
+}
+
 export function DeleteVPN(arg1) {
   return window['go']['main']['App']['DeleteVPN'](arg1);
 }
@@ -46,6 +50,10 @@ export function ListServers() {
   return window['go']['main']['App']['ListServers']();
 }
 
+export function ListTasks() {
+  return window['go']['main']['App']['ListTasks']();
+}
+
 export function ListVPNs() {
   return window['go']['main']['App']['ListVPNs']();
 }
@@ -56,6 +64,10 @@ export function OpenContainerShell(arg1, arg2, arg3, arg4, arg5) {
 
 export function SaveServer(arg1, arg2) {
   return window['go']['main']['App']['SaveServer'](arg1, arg2);
+}
+
+export function SaveTask(arg1) {
+  return window['go']['main']['App']['SaveTask'](arg1);
 }
 
 export function SaveVPN(arg1, arg2) {

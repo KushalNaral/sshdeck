@@ -65,6 +65,11 @@ export function ConnectBar({ server, vpn, session, onConnect, onDisconnect, onMa
             </button>
           </>
         )}
+        {session?.state === 'connecting' && (
+          <button className="btn" onClick={onDisconnect}>
+            Cancel
+          </button>
+        )}
         {!session && (
           <button className="btn primary" onClick={onConnect}>
             Connect

@@ -19,7 +19,8 @@ type Dep struct {
 
 var deps = []Dep{
 	{Name: "openfortivpn", Purpose: "FortiClient VPN (HQ old, Quartz Reports)", Installable: true},
-	{Name: "openconnect", Purpose: "GlobalProtect VPN (HQ, Portal)", Installable: true},
+	{Name: "gpclient", Purpose: "GlobalProtect VPN, preferred when installed (HQ, Portal, Branch)"},
+	{Name: "openconnect", Purpose: "GlobalProtect VPN, used when gpclient is missing", Installable: true},
 	{Name: "pkexec", Purpose: "Asks for your admin password to start a VPN (part of polkit)"},
 }
 

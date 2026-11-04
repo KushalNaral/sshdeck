@@ -18,6 +18,8 @@ export function Connect(arg1:string):Promise<main.ConnectResult>;
 
 export function DeleteServer(arg1:string):Promise<void>;
 
+export function DeleteTask(arg1:string):Promise<void>;
+
 export function DeleteVPN(arg1:string):Promise<void>;
 
 export function Disconnect(arg1:string):Promise<void>;
@@ -26,11 +28,15 @@ export function InstallDependencies(arg1:Array<string>):Promise<void>;
 
 export function ListServers():Promise<Array<store.Server>>;
 
+export function ListTasks():Promise<Array<store.Task>>;
+
 export function ListVPNs():Promise<Array<store.VPN>>;
 
 export function OpenContainerShell(arg1:string,arg2:number,arg3:string,arg4:string,arg5:boolean):Promise<void>;
 
 export function SaveServer(arg1:store.Server,arg2:string):Promise<store.Server>;
+
+export function SaveTask(arg1:store.Task):Promise<store.Task>;
 
 export function SaveVPN(arg1:store.VPN,arg2:string):Promise<store.VPN>;
 

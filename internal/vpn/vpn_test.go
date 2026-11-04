@@ -114,6 +114,7 @@ func TestFortiUpWaitsForTheTunnel(t *testing.T) {
 }
 
 func TestPasswordNeverInArgv(t *testing.T) {
+	withClients(t, "openconnect")
 	for _, v := range []store.VPN{forti, gp} {
 		f := &fakeStarter{script: printThenStay("Tunnel is up and running.", "Connected as 10.0.0.2")}
 		if err := New(f).Up(ctx(t), v, "hunter2"); err != nil {
@@ -141,7 +142,21 @@ func TestFortiPasswordGoesInAPrivateFileThatIsRemoved(t *testing.T) {
 	}
 }
 
+// withClients pretends only the named programs are installed.
+func withClients(t *testing.T, have ...string) {
+	t.Helper()
+	old := lookPath
+	lookPath = func(n string) (string, error) {
+		if slices.Contains(have, n) {
+			return "/usr/bin/" + n, nil
+		}
+		return "", errors.New("not found")
+	}
+	t.Cleanup(func() { lookPath = old })
+}
+
 func TestGlobalProtectPasswordGoesOnStdin(t *testing.T) {
+	withClients(t, "openconnect")
 	f := &fakeStarter{script: printThenStay("Connected as 10.0.0.2")}
 	if err := New(f).Up(ctx(t), gp, "hunter2"); err != nil {
 		t.Fatal(err)
@@ -189,6 +204,7 @@ func TestUntrustedCertificateGivesTheDigest(t *testing.T) {
 }
 
 func TestGlobalProtectUsesOpenconnect(t *testing.T) {
+	withClients(t, "openconnect")
 	f := &fakeStarter{script: printThenStay("Connected as 10.0.0.2, using SSL")}
 	if err := New(f).Up(ctx(t), gp, "pw"); err != nil {
 		t.Fatal(err)
@@ -292,5 +308,99 @@ func TestUntrustedCertificateWithoutTheHintLine(t *testing.T) {
 	var ce *CertError
 	if !errors.As(err, &ce) || ce.Digest != digest {
 		t.Fatalf("want a CertError with the digest, got %v", err)
+	}
+}
+
+func TestGlobalProtectPrefersGpclientAndIsUpWhenItExitsCleanly(t *testing.T) {
+	withClients(t, "gpclient", "openconnect")
+	f := &fakeStarter{script: printThenExit(nil, "Sign-in complete")}
+	m := New(f)
+	if err := m.Up(ctx(t), gp, "hunter2"); err != nil {
+		t.Fatal(err)
+	}
+	if m.Status("gov") != Up {
+		t.Fatalf("status %v", m.Status("gov"))
+	}
+	want := []string{"pkexec", "gpclient", "--fix-openssl", "connect", "connect.example.gov", "-u", "support", "--auto-gateway", "--passwd-on-stdin", "--background"}
+	if !slices.Equal(f.argv, want) {
+		t.Fatalf("argv %v\nwant %v", f.argv, want)
+	}
+	if strings.Contains(strings.Join(f.argv, " "), "hunter2") || f.stdin != "hunter2\n" {
+		t.Fatalf("password must be on stdin only: argv %v stdin %q", f.argv, f.stdin)
+	}
+}
+
+func TestGpclientNonStandardPortIsPartOfTheServer(t *testing.T) {
+	withClients(t, "gpclient")
+	f := &fakeStarter{script: printThenExit(nil)}
+	v := gp
+	v.Port = 8443
+	if err := New(f).Up(ctx(t), v, "pw"); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Contains(f.argv, "connect.example.gov:8443") {
+		t.Fatalf("argv %v", f.argv)
+	}
+}
+
+func TestGpclientFailureShowsItsOutput(t *testing.T) {
+	withClients(t, "gpclient")
+	f := &fakeStarter{script: printThenExit(errors.New("exit status 1"), "INFO  portal login", "ERROR Gateway auth failed: bad password")}
+	m := New(f)
+	err := m.Up(ctx(t), gp, "pw")
+	if err == nil || !strings.Contains(err.Error(), "Gateway auth failed") {
+		t.Fatalf("err %v", err)
+	}
+	if m.Status("gov") != Failed {
+		t.Fatalf("status %v", m.Status("gov"))
+	}
+}
+
+func TestGpclientDownRunsDisconnect(t *testing.T) {
+	withClients(t, "gpclient")
+	f := &fakeStarter{script: printThenExit(nil)}
+	m := New(f)
+	if err := m.Up(ctx(t), gp, "pw"); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.Down("gov"); err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{"pkexec", "gpclient", "disconnect"}; !slices.Equal(f.argv, want) {
+		t.Fatalf("down argv %v, want %v", f.argv, want)
+	}
+	if m.Status("gov") != Down {
+		t.Fatalf("status %v", m.Status("gov"))
+	}
+}
+
+func TestToolPicksGpclientWhenInstalled(t *testing.T) {
+	withClients(t, "gpclient", "openconnect")
+	if got := Tool(store.GP); got != "gpclient" {
+		t.Fatal(got)
+	}
+	withClients(t, "openconnect")
+	if got := Tool(store.GP); got != "openconnect" {
+		t.Fatal(got)
+	}
+	if got := Tool(store.Forti); got != "openfortivpn" {
+		t.Fatal(got)
+	}
+}
+
+func TestNothingStartsWhenAFieldCouldInjectIntoTheConfig(t *testing.T) {
+	for name, v := range map[string]store.VPN{
+		"user newline":    {ID: "x", Name: "X", Kind: store.Forti, Gateway: "gw", Port: 443, User: "u\npppd-plugin = x"},
+		"gateway newline": {ID: "x", Name: "X", Kind: store.Forti, Gateway: "gw\nx", Port: 443, User: "u"},
+		"gateway dash":    {ID: "x", Name: "X", Kind: store.Forti, Gateway: "--script=/x", Port: 443, User: "u"},
+	} {
+		f := &fakeStarter{script: printThenStay("Tunnel is up")}
+		if err := New(f).Up(ctx(t), v, "pw"); err == nil || f.n != 0 {
+			t.Errorf("%s: err=%v starts=%d", name, err, f.n)
+		}
+	}
+	f := &fakeStarter{script: printThenStay("Tunnel is up")}
+	if err := New(f).Up(ctx(t), forti, "pass\nword"); err == nil || f.n != 0 {
+		t.Errorf("password newline: err=%v starts=%d", err, f.n)
 	}
 }

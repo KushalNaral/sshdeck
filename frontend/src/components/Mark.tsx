@@ -1,5 +1,4 @@
 import type { Mark as MarkKind } from '../types'
-import { STAGES } from '../types'
 
 const LABEL: Record<MarkKind, string> = {
   filled: 'Reachable',
@@ -29,16 +28,5 @@ export function Mark({ kind }: { kind: MarkKind }) {
         </>
       )}
     </svg>
-  )
-}
-
-/** Five fixed-scale stages of the patch journey. */
-export function Journey({ stage }: { stage: number }) {
-  return (
-    <span className="cells" role="img" aria-label={`Patch journey: ${stage === 0 ? 'not started' : STAGES[stage - 1]}`} title={stage === 0 ? 'Not started' : STAGES[stage - 1]}>
-      {STAGES.map((s, i) => (
-        <i key={s} className={i < stage ? 'on' : ''} />
-      ))}
-    </span>
   )
 }

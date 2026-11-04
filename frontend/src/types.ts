@@ -23,6 +23,8 @@ export interface Server {
   port: number
   user: string
   auth: 'password' | 'key'
+  /** Key login: the private key file; empty means use ssh-agent. The passphrase is stored in the keyring like a password. */
+  keyPath?: string
   /** Profile used to reach this server; null means direct, unless vpnRequired says one is needed but not set. */
   vpnId: string | null
   vpnRequired?: boolean
@@ -100,9 +102,22 @@ export interface Session {
   error?: { problem: string; recovery: string }
 }
 
-export type Mode = 'firefight' | 'patch' | 'admin'
+export type Mode = 'firefight' | 'tasks' | 'admin'
 
-export const STAGES = ['Found', 'Scheduled', 'Patched', 'Verified', 'Signed off'] as const
+export type TaskStatus = 'todo' | 'doing' | 'done'
+
+/** Work to do on one or more servers. Due is YYYY-MM-DD or empty. */
+export interface Task {
+  id: string
+  title: string
+  note?: string
+  status: TaskStatus
+  tags: string[]
+  serverIds: string[]
+  due?: string
+  created: number
+  updated: number
+}
 
 export const VPN_LABEL: Record<VpnKind, string> = {
   forti: 'FortiClient',

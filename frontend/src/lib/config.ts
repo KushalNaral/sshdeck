@@ -1,10 +1,11 @@
 import * as App from '../../wailsjs/go/main/App'
 import { SERVERS, VPNS } from '../data'
-import type { Server, Vpn } from '../types'
+import type { Server, Task, Vpn } from '../types'
 
 export interface Config {
   servers: Server[]
   vpns: Vpn[]
+  tasks: Task[]
 }
 
 /** Where servers and VPN profiles live. Passwords only ever go one way: into save*, never back out. */
@@ -14,6 +15,8 @@ export interface ConfigStore {
   deleteServer(id: string): Promise<void>
   saveVpn(v: Vpn, password: string): Promise<Vpn>
   deleteVpn(id: string): Promise<void>
+  saveTask(t: Task): Promise<Task>
+  deleteTask(id: string): Promise<void>
 }
 
 /** Wails rejects with a plain string; make every failure a readable message. */
@@ -34,8 +37,8 @@ const toGoServer = ({ mark: _mark, ...s }: Server) => ({ ...s, vpnId: s.vpnId ??
 
 const wailsStore: ConfigStore = {
   async load() {
-    const [servers, vpns] = await Promise.all([App.ListServers(), App.ListVPNs()])
-    return { servers: servers.map(fromGoServer), vpns: vpns as Vpn[] }
+    const [servers, vpns, tasks] = await Promise.all([App.ListServers(), App.ListVPNs(), App.ListTasks()])
+    return { servers: servers.map(fromGoServer), vpns: vpns as Vpn[], tasks: tasks as Task[] }
   },
   async saveServer(s, pw) {
     return fromGoServer(await App.SaveServer(toGoServer(s), pw))
@@ -45,6 +48,10 @@ const wailsStore: ConfigStore = {
     return (await App.SaveVPN(v as any, pw)) as Vpn
   },
   deleteVpn: (id) => App.DeleteVPN(id),
+  async saveTask(t) {
+    return (await App.SaveTask(t as any)) as Task
+  },
+  deleteTask: (id) => App.DeleteTask(id),
 }
 
 // Browser-only dev mode: demo data kept in localStorage, passwords discarded.
@@ -63,11 +70,11 @@ const localStore: ConfigStore = (() => {
     async load() {
       try {
         const c = JSON.parse(localStorage.getItem(KEY) ?? 'null')
-        if (Array.isArray(c?.servers) && Array.isArray(c?.vpns)) return (cfg = c)
+        if (Array.isArray(c?.servers) && Array.isArray(c?.vpns)) return (cfg = { tasks: [], ...c })
       } catch {
         /* fall through to demo data */
       }
-      return (cfg = { servers: SERVERS, vpns: VPNS })
+      return (cfg = { servers: SERVERS, vpns: VPNS, tasks: [] })
     },
     async saveServer(s) {
       s = { ...s, id: s.id || `s-${Date.now().toString(36)}` }
@@ -87,6 +94,17 @@ const localStore: ConfigStore = (() => {
     },
     async deleteVpn(id) {
       cfg = { ...cfg!, vpns: cfg!.vpns.filter((x) => x.id !== id) }
+      persist()
+    },
+    async saveTask(t) {
+      const now = Date.now()
+      t = { ...t, id: t.id || `t-${now.toString(36)}`, created: t.created || now, updated: now }
+      cfg = { ...cfg!, tasks: upsert(cfg!.tasks, t) }
+      persist()
+      return t
+    },
+    async deleteTask(id) {
+      cfg = { ...cfg!, tasks: cfg!.tasks.filter((x) => x.id !== id) }
       persist()
     },
   }

@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"golang.org/x/crypto/ssh"
+	"golang.org/x/crypto/ssh/agent"
 	"golang.org/x/crypto/ssh/knownhosts"
 
 	"github.com/KushalNaral/sshdeck/internal/store"
@@ -89,15 +90,60 @@ func hostKeyCallback() (ssh.HostKeyCallback, error) {
 	}, nil
 }
 
-func dial(ctx context.Context, srv store.Server, secret string) (*ssh.Client, error) {
-	if srv.Auth != "password" {
-		return nil, fmt.Errorf("%s uses key login, which is not supported yet; switch it to password in Admin", srv.Name)
+// authMethod builds the login method for srv. For key login, secret is the key's passphrase (empty if it has none).
+// With no key file set, keys come from the running ssh-agent.
+func authMethod(srv store.Server, secret string) (ssh.AuthMethod, func(), error) {
+	none := func() {}
+	if srv.Auth != "key" {
+		return ssh.Password(secret), none, nil
 	}
+	if srv.KeyPath == "" {
+		sock := os.Getenv("SSH_AUTH_SOCK")
+		if sock == "" {
+			return nil, none, fmt.Errorf("%s uses key login but sets no key file, and no ssh-agent is running (SSH_AUTH_SOCK is empty): choose a key file in Admin or start ssh-agent", srv.Name)
+		}
+		c, err := net.Dial("unix", sock)
+		if err != nil {
+			return nil, none, fmt.Errorf("cannot reach the ssh-agent at %s: %w", sock, err)
+		}
+		return ssh.PublicKeysCallback(agent.NewClient(c).Signers), func() { c.Close() }, nil
+	}
+	path := srv.KeyPath
+	if rest, ok := strings.CutPrefix(path, "~/"); ok {
+		if home, err := os.UserHomeDir(); err == nil {
+			path = filepath.Join(home, rest)
+		}
+	}
+	pem, err := os.ReadFile(path)
+	if err != nil {
+		return nil, none, fmt.Errorf("cannot read the key file %s: %w", srv.KeyPath, err)
+	}
+	signer, err := ssh.ParsePrivateKey(pem)
+	var missing *ssh.PassphraseMissingError
+	if errors.As(err, &missing) {
+		if secret == "" {
+			return nil, none, fmt.Errorf("the key %s is protected by a passphrase: enter it in Admin", srv.KeyPath)
+		}
+		if signer, err = ssh.ParsePrivateKeyWithPassphrase(pem, []byte(secret)); err != nil {
+			return nil, none, fmt.Errorf("wrong passphrase for the key %s", srv.KeyPath)
+		}
+	} else if err != nil {
+		return nil, none, fmt.Errorf("cannot use the key file %s: %w", srv.KeyPath, err)
+	}
+	return ssh.PublicKeys(signer), none, nil
+}
+
+func dial(ctx context.Context, srv store.Server, secret string) (*ssh.Client, error) {
+	method, closeAuth, err := authMethod(srv, secret)
+	if err != nil {
+		return nil, err
+	}
+	defer closeAuth() // signing happens during the handshake, so an agent connection is only needed until then
 	hk, err := hostKeyCallback()
 	if err != nil {
 		return nil, err
 	}
-	cfg := &ssh.ClientConfig{User: srv.User, Auth: []ssh.AuthMethod{ssh.Password(secret)}, HostKeyCallback: hk, Timeout: 15 * time.Second}
+	cfg := &ssh.ClientConfig{User: srv.User, Auth: []ssh.AuthMethod{method}, HostKeyCallback: hk, Timeout: 15 * time.Second}
 	addr := net.JoinHostPort(srv.Host, strconv.Itoa(srv.Port))
 	nc, err := (&net.Dialer{Timeout: cfg.Timeout}).DialContext(ctx, "tcp", addr)
 	if err != nil {
@@ -111,6 +157,9 @@ func dial(ctx context.Context, srv store.Server, secret string) (*ssh.Client, er
 		nc.Close()
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
+		}
+		if strings.Contains(err.Error(), "unable to authenticate") && srv.Auth == "key" {
+			return nil, fmt.Errorf("login to %s as %s failed: the server did not accept the key: %w", addr, srv.User, err)
 		}
 		if strings.Contains(err.Error(), "unable to authenticate") {
 			return nil, fmt.Errorf("login to %s as %s failed: wrong user or password: %w", addr, srv.User, err)
@@ -147,6 +196,7 @@ func Open(ctx context.Context, srv store.Server, secret string) (Session, error)
 		return fail(err)
 	}
 	x := &session{c: c, s: s, in: in, out: make(chan []byte, 16), done: make(chan struct{})}
+	go keepAlive(c, 15*time.Second, 10*time.Second, x.done, func() { x.Close() })
 	go func() {
 		defer close(x.out)
 		buf := make([]byte, 32*1024)
@@ -165,6 +215,38 @@ func Open(ctx context.Context, srv store.Server, secret string) (Session, error)
 		}
 	}()
 	return x, nil
+}
+
+// requester is the part of *ssh.Client that keepAlive needs.
+type requester interface {
+	SendRequest(name string, wantReply bool, payload []byte) (bool, []byte, error)
+}
+
+// keepAlive probes the server every `every` until done closes. A probe that fails or gets no answer within
+// `wait` means the link is dead (sleep, Wi-Fi change, VPN drop): onDead runs once and it stops.
+func keepAlive(p requester, every, wait time.Duration, done <-chan struct{}, onDead func()) {
+	t := time.NewTicker(every)
+	defer t.Stop()
+	for {
+		select {
+		case <-done:
+			return
+		case <-t.C:
+		}
+		res := make(chan error, 1)
+		go func() { _, _, err := p.SendRequest("keepalive@openssh.com", true, nil); res <- err }()
+		select {
+		case err := <-res:
+			if err == nil {
+				continue
+			}
+		case <-time.After(wait):
+		case <-done:
+			return
+		}
+		onDead()
+		return
+	}
 }
 
 type session struct {

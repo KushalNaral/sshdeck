@@ -85,6 +85,10 @@ func (a *App) SaveVPN(v store.VPN, password string) (store.VPN, error) {
 }
 func (a *App) DeleteVPN(id string) error { return a.st.DeleteVPN(id) }
 
+func (a *App) ListTasks() []store.Task                   { return a.st.Tasks() }
+func (a *App) SaveTask(t store.Task) (store.Task, error) { return a.st.SaveTask(t) }
+func (a *App) DeleteTask(id string) error                { return a.st.DeleteTask(id) }
+
 // beforeClose asks before closing a window that still has connections, since closing ends their shells and VPNs.
 func (a *App) beforeClose(ctx context.Context) (prevent bool) {
 	a.mu.Lock()

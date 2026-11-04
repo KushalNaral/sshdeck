@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"regexp"
 	"strings"
 	"sync"
@@ -60,6 +61,7 @@ func New(s Starter) Manager { return &manager{s: s, m: map[string]*entry{}} }
 type entry struct {
 	p     Proc
 	state State
+	stop  []string // for clients that leave a background daemon: the command that ends it
 }
 
 type manager struct {
@@ -97,23 +99,44 @@ func runtimeDir() string {
 	return os.TempDir()
 }
 
+// lookPath is swapped in tests.
+var lookPath = exec.LookPath
+
+// Tool is the program that connects a VPN of this kind. GlobalProtect prefers gpclient (portal and gateway
+// sign-in, which plain openconnect fails on some gateways) and falls back to openconnect.
+func Tool(k store.VPNKind) string {
+	switch k {
+	case store.Forti:
+		return "openfortivpn"
+	case store.GP:
+		if _, err := lookPath("gpclient"); err == nil {
+			return "gpclient"
+		}
+		return "openconnect"
+	}
+	return ""
+}
+
 // command returns the client's argv, what to write to its stdin, the output line that means "the tunnel is up",
 // and a cleanup to run when the attempt is over. openfortivpn does not take a password on stdin, so it gets a
 // 0600 config file that is deleted as soon as the attempt ends.
-func command(v store.VPN, secret string) (argv []string, stdin, ready string, cleanup func(), err error) {
+func command(v store.VPN, secret string) (argv []string, stdin, ready string, stop []string, cleanup func(), err error) {
 	cleanup = func() {}
+	if err := store.CheckVPN(v, secret); err != nil {
+		return nil, "", "", nil, cleanup, err
+	}
 	gw := fmt.Sprintf("%s:%d", v.Gateway, v.Port)
 	switch v.Kind {
 	case store.Forti:
 		f, err := os.CreateTemp(runtimeDir(), "sshdeck-vpn-*.conf")
 		if err != nil {
-			return nil, "", "", nil, err
+			return nil, "", "", nil, nil, err
 		}
 		cleanup = func() { os.Remove(f.Name()) }
 		if err := f.Chmod(0o600); err != nil {
 			f.Close()
 			cleanup()
-			return nil, "", "", nil, err
+			return nil, "", "", nil, nil, err
 		}
 		conf := fmt.Sprintf("host = %s\nport = %d\nusername = %s\npassword = %s\n", v.Gateway, v.Port, v.User, secret)
 		if v.TrustedCert != "" {
@@ -125,15 +148,24 @@ func command(v store.VPN, secret string) (argv []string, stdin, ready string, cl
 		}
 		if werr != nil {
 			cleanup()
-			return nil, "", "", nil, werr
+			return nil, "", "", nil, nil, werr
 		}
-		return []string{"pkexec", "openfortivpn", "-c", f.Name()}, "", "Tunnel is up", cleanup, nil
+		return []string{"pkexec", "openfortivpn", "-c", f.Name()}, "", "Tunnel is up", nil, cleanup, nil
 	case store.GP:
-		return []string{"pkexec", "openconnect", "--protocol=gp", "--user", v.User, "--passwd-on-stdin", gw}, secret + "\n", "Connected as", cleanup, nil
+		if Tool(store.GP) == "gpclient" {
+			// --background: gpclient signs in, then exits 0 and leaves the tunnel running, so no ready line is needed.
+			server := v.Gateway
+			if v.Port != 443 {
+				server = gw
+			}
+			argv := []string{"pkexec", "gpclient", "--fix-openssl", "connect", server, "-u", v.User, "--auto-gateway", "--passwd-on-stdin", "--background"}
+			return argv, secret + "\n", "", []string{"pkexec", "gpclient", "disconnect"}, cleanup, nil
+		}
+		return []string{"pkexec", "openconnect", "--protocol=gp", "--user", v.User, "--passwd-on-stdin", gw}, secret + "\n", "Connected as", nil, cleanup, nil
 	case store.Hillstone:
-		return nil, "", "", cleanup, ErrManual
+		return nil, "", "", nil, cleanup, ErrManual
 	}
-	return nil, "", "", cleanup, fmt.Errorf("vpn: unknown client %q", v.Kind)
+	return nil, "", "", nil, cleanup, fmt.Errorf("vpn: unknown client %q", v.Kind)
 }
 
 // explain turns the client's last output lines into one error: its ERROR lines, or else the last line.
@@ -161,12 +193,12 @@ func explain(lines []string) error {
 }
 
 func (m *manager) Up(ctx context.Context, v store.VPN, secret string) error {
-	argv, stdin, ready, cleanup, err := command(v, secret)
+	argv, stdin, ready, stop, cleanup, err := command(v, secret)
 	defer cleanup()
 	if err != nil {
 		return err
 	}
-	e := &entry{state: Connecting}
+	e := &entry{state: Connecting, stop: stop}
 	m.mu.Lock()
 	if cur := m.m[v.ID]; cur != nil {
 		switch cur.state {
@@ -195,6 +227,10 @@ func (m *manager) Up(ctx context.Context, v store.VPN, secret string) error {
 		select {
 		case line, ok := <-p.Lines():
 			if !ok {
+				if ready == "" && p.Wait() == nil { // background client: a clean exit is "signed in, tunnel running"
+					m.setState(v.ID, e, Up)
+					return nil
+				}
 				m.setState(v.ID, e, Failed)
 				if len(tail) == 0 {
 					return fmt.Errorf("%s exited before the tunnel came up, without saying why", argv[1])
@@ -206,7 +242,7 @@ func (m *manager) Up(ctx context.Context, v store.VPN, secret string) error {
 					tail = tail[1:]
 				}
 			}
-			if strings.Contains(line, ready) {
+			if ready != "" && strings.Contains(line, ready) {
 				m.setState(v.ID, e, Up)
 				go func() { // keep draining so the client never blocks on a full pipe; note when it dies
 					for range p.Lines() {
@@ -239,6 +275,19 @@ func (m *manager) Down(id string) error {
 		return nil
 	}
 	err := e.p.Stop()
+	if e.stop != nil {
+		if p, serr := m.s.Start(context.Background(), e.stop, ""); serr != nil {
+			err = serr
+		} else {
+			go func() {
+				for range p.Lines() {
+				}
+			}()
+			if werr := p.Wait(); werr != nil {
+				err = fmt.Errorf("%s: %w", strings.Join(e.stop[1:], " "), werr)
+			}
+		}
+	}
 	m.setState(id, e, Down)
 	return err
 }

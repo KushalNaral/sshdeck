@@ -13,6 +13,7 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"time"
 )
 
 type VPNKind string
@@ -30,6 +31,7 @@ type Server struct {
 	Port        int      `json:"port"`
 	User        string   `json:"user"`
 	Auth        string   `json:"auth"`  // "password" or "key"
+	KeyPath     string   `json:"keyPath,omitempty"` // key auth: private key file; empty means use ssh-agent. The passphrase, if any, is the stored secret.
 	VPNID       string   `json:"vpnId"` // empty means direct, unless VPNRequired
 	VPNRequired bool     `json:"vpnRequired,omitempty"`
 	OS          string   `json:"os,omitempty"`
@@ -51,6 +53,19 @@ type VPN struct {
 	Note    string  `json:"note,omitempty"`
 	// TrustedCert is the sha256 of the gateway certificate to accept (FortiClient gateways with a self-signed certificate).
 	TrustedCert string `json:"trustedCert,omitempty"`
+}
+
+// Task is a to-do about one or more servers, such as "upgrade PHP on Atlas". Status is todo, doing or done.
+type Task struct {
+	ID        string   `json:"id"`
+	Title     string   `json:"title"`
+	Note      string   `json:"note,omitempty"`
+	Status    string   `json:"status"`
+	Tags      []string `json:"tags"`
+	ServerIDs []string `json:"serverIds"`
+	Due       string   `json:"due,omitempty"` // YYYY-MM-DD
+	Created   int64    `json:"created"`       // unix ms
+	Updated   int64    `json:"updated"`
 }
 
 // Secrets stores passwords by key. Keys look like "server/<id>" and "vpn/<id>".
@@ -75,6 +90,7 @@ func (e VPNInUseError) Error() string {
 type fileData struct {
 	Servers []Server `json:"servers"`
 	VPNs    []VPN    `json:"vpns"`
+	Tasks   []Task   `json:"tasks,omitempty"`
 }
 
 type Store struct {
@@ -117,6 +133,46 @@ func (s *Store) Password(kind, id string) (string, error) {
 	return s.sec.Get(kind + "/" + id)
 }
 
+// hostRe allows host names, IPv4 and IPv6 literals; it cannot start with "-", which a client would read as an option.
+var hostRe = regexp.MustCompile(`^[A-Za-z0-9_.:%\[\]][A-Za-z0-9_.:%\[\]-]*$`)
+
+func hasControl(s string) bool {
+	return strings.ContainsFunc(s, func(r rune) bool { return r < 0x20 || r == 0x7f })
+}
+
+// checkUser refuses what could break out of a client's argument or config line.
+func checkUser(user string) error {
+	switch {
+	case hasControl(user):
+		return invalid("user must not contain control characters or line breaks")
+	case strings.HasPrefix(user, "-"):
+		return invalid("user must not start with a dash")
+	}
+	return nil
+}
+
+func checkHost(host string) error {
+	if !hostRe.MatchString(host) {
+		return invalid("host %q must be a name or address without spaces, and not start with a dash", host)
+	}
+	return nil
+}
+
+// CheckVPN validates the fields that reach a root VPN client, and the VPN password (a line break in it
+// could add lines to the client's config file). The vpn package calls it again before starting a client.
+func CheckVPN(v VPN, password string) error {
+	if err := checkHost(v.Gateway); err != nil {
+		return err
+	}
+	if err := checkUser(v.User); err != nil {
+		return err
+	}
+	if strings.ContainsAny(password, "\r\n\x00") {
+		return invalid("the VPN password must not contain line breaks")
+	}
+	return nil
+}
+
 var certRe = regexp.MustCompile(`^[0-9a-fA-F]{64}$`)
 
 var slugRe = regexp.MustCompile(`[^a-z0-9]+`)
@@ -145,6 +201,12 @@ func (s *Store) SaveServer(sv Server, password string) (Server, error) {
 		return sv, invalid("host is required")
 	case sv.User == "":
 		return sv, invalid("user is required")
+	case checkHost(sv.Host) != nil:
+		return sv, checkHost(sv.Host)
+	case checkUser(sv.User) != nil:
+		return sv, checkUser(sv.User)
+	case hasControl(sv.KeyPath):
+		return sv, invalid("key file path must not contain control characters")
 	case !validPort(sv.Port):
 		return sv, invalid("port must be 1-65535")
 	case sv.Auth != "password" && sv.Auth != "key":
@@ -181,6 +243,9 @@ func (s *Store) DeleteServer(id string) error {
 		return ErrNotFound
 	}
 	s.d.Servers = append(s.d.Servers[:i], s.d.Servers[i+1:]...)
+	for j := range s.d.Tasks {
+		s.d.Tasks[j].ServerIDs = without(s.d.Tasks[j].ServerIDs, id)
+	}
 	if err := s.sec.Delete("server/" + id); err != nil && !errors.Is(err, ErrNotFound) {
 		return err
 	}
@@ -201,6 +266,9 @@ func (s *Store) SaveVPN(v VPN, password string) (VPN, error) {
 		return v, invalid("unknown VPN client %q", v.Kind)
 	case v.TrustedCert != "" && !certRe.MatchString(v.TrustedCert):
 		return v, invalid("trusted certificate must be a 64-character sha256 hex digest")
+	}
+	if err := CheckVPN(v, password); err != nil {
+		return v, err
 	}
 	if v.ID == "" {
 		v.ID = newID(v.Name)
@@ -239,6 +307,93 @@ func (s *Store) DeleteVPN(id string) error {
 		return err
 	}
 	return s.flush()
+}
+
+func (s *Store) Tasks() []Task {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]Task{}, s.d.Tasks...)
+}
+
+// SaveTask adds or replaces a task. Tags are lower-cased and de-duplicated; a new task starts as todo.
+func (s *Store) SaveTask(t Task) (Task, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	t.Title = strings.TrimSpace(t.Title)
+	if t.Status == "" {
+		t.Status = "todo"
+	}
+	switch {
+	case t.Title == "":
+		return t, invalid("title is required")
+	case t.Status != "todo" && t.Status != "doing" && t.Status != "done":
+		return t, invalid("status must be todo, doing or done")
+	}
+	if t.Due != "" {
+		if _, err := time.Parse("2006-01-02", t.Due); err != nil {
+			return t, invalid("due date must look like 2026-12-31")
+		}
+	}
+	for _, id := range t.ServerIDs {
+		if s.serverIndex(id) < 0 {
+			return t, invalid("unknown server %q", id)
+		}
+	}
+	seen := map[string]bool{}
+	tags := []string{}
+	for _, g := range t.Tags {
+		if g = strings.ToLower(strings.TrimSpace(g)); g != "" && !seen[g] {
+			seen[g] = true
+			tags = append(tags, g)
+		}
+	}
+	t.Tags = tags
+	if t.ServerIDs == nil {
+		t.ServerIDs = []string{}
+	}
+	now := time.Now().UnixMilli()
+	t.Updated = now
+	if i := s.taskIndex(t.ID); t.ID != "" && i >= 0 {
+		t.Created = s.d.Tasks[i].Created
+		s.d.Tasks[i] = t
+	} else {
+		if t.ID == "" {
+			t.ID = newID("task")
+		}
+		t.Created = now
+		s.d.Tasks = append(s.d.Tasks, t)
+	}
+	return t, s.flush()
+}
+
+func (s *Store) DeleteTask(id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	i := s.taskIndex(id)
+	if i < 0 {
+		return ErrNotFound
+	}
+	s.d.Tasks = append(s.d.Tasks[:i], s.d.Tasks[i+1:]...)
+	return s.flush()
+}
+
+func (s *Store) taskIndex(id string) int {
+	for i, x := range s.d.Tasks {
+		if x.ID == id {
+			return i
+		}
+	}
+	return -1
+}
+
+func without(ids []string, id string) []string {
+	out := []string{}
+	for _, x := range ids {
+		if x != id {
+			out = append(out, x)
+		}
+	}
+	return out
 }
 
 func (s *Store) serverIndex(id string) int {

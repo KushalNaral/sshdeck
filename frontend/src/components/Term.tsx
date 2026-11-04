@@ -1,6 +1,6 @@
 import { FitAddon } from '@xterm/addon-fit'
 import { Terminal } from '@xterm/xterm'
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { Backend } from '../api'
 import type { ContainerTab, Server } from '../types'
 
@@ -17,15 +17,17 @@ export function Term({ server, tab, container, backend, visible }: Props) {
   const host = useRef<HTMLDivElement>(null)
   const term = useRef<Terminal | null>(null)
   const fit = useRef<FitAddon | null>(null)
+  const [ended, setEnded] = useState(false)
+  const restart = useRef<() => void>(() => {})
 
   useEffect(() => {
-    const css = getComputedStyle(document.documentElement)
+    const plate = () => getComputedStyle(document.documentElement).getPropertyValue('--plate').trim() || '#111418'
     const t = new Terminal({
       fontFamily: "'JetBrains Mono Variable', monospace",
       fontSize: 14,
       cursorBlink: true,
       theme: {
-        background: css.getPropertyValue('--plate').trim() || '#111418',
+        background: plate(),
         foreground: '#f2efe4',
         cursor: '#f6d27a',
         selectionBackground: '#d9a21b',
@@ -36,20 +38,40 @@ export function Term({ server, tab, container, backend, visible }: Props) {
     t.loadAddon(f)
     t.open(host.current!)
     term.current = t
+    const retheme = () => (t.options.theme = { ...t.options.theme, background: plate() })
+    window.addEventListener('sshdeck:theme', retheme)
     fit.current = f
     let live = true
     let detach = () => {}
     f.fit()
-    ;(container ? backend.openContainer(server.id, tab, container.container, container.user, container.sudo) : Promise.resolve())
-      .then(() => backend.attach(
-        server.id,
-        tab,
-        { cols: t.cols, rows: t.rows },
-        (d) => live && t.write(d),
-        () => live && t.write('\r\n\x1b[2m[session closed]\x1b[0m\r\n'),
-      ))
-      .then((off) => (live ? (detach = off) : off()))
-      .catch((e) => live && t.write(`\r\n\x1b[31m${e instanceof Error ? e.message : String(e)}\x1b[0m\r\n`))
+    // Opens (or re-opens) this tab's shell. After the link drops, the same call makes a fresh SSH session.
+    const begin = () => {
+      setEnded(false)
+      detach()
+      detach = () => {}
+      ;(container ? backend.openContainer(server.id, tab, container.container, container.user, container.sudo) : Promise.resolve())
+        .then(() =>
+          backend.attach(
+            server.id,
+            tab,
+            { cols: t.cols, rows: t.rows },
+            (d) => live && t.write(d),
+            () => {
+              if (!live) return
+              t.write('\r\n\x1b[2m[session closed]\x1b[0m\r\n')
+              setEnded(true)
+            },
+          ),
+        )
+        .then((off) => (live ? (detach = off) : off()))
+        .catch((e) => {
+          if (!live) return
+          t.write(`\r\n\x1b[31m${e instanceof Error ? e.message : String(e)}\x1b[0m\r\n`)
+          setEnded(true)
+        })
+    }
+    restart.current = begin
+    begin()
     t.onData((d) => backend.write(server.id, tab, d))
     t.onResize(({ cols, rows }) => backend.resize(server.id, tab, cols, rows))
     const ro = new ResizeObserver(() => host.current?.offsetParent && f.fit())
@@ -59,6 +81,7 @@ export function Term({ server, tab, container, backend, visible }: Props) {
       detach()
       backend.closeShell(server.id, tab)
       ro.disconnect()
+      window.removeEventListener('sshdeck:theme', retheme)
       t.dispose()
     }
     // server.id, not server: editing a server's details must not tear down its open shell.
@@ -72,5 +95,14 @@ export function Term({ server, tab, container, backend, visible }: Props) {
     }
   }, [visible])
 
-  return <div ref={host} className="term" style={{ display: visible ? 'block' : 'none' }} />
+  return (
+    <div className="term" style={{ display: visible ? 'block' : 'none' }}>
+      <div ref={host} style={{ height: '100%' }} />
+      {ended && (
+        <button className="btn reconnect" onClick={() => restart.current()}>
+          Reconnect
+        </button>
+      )}
+    </div>
+  )
 }

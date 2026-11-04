@@ -32,7 +32,7 @@
 }
 
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme='light']) {
     --bed: #3a3121;
     --bed-lit: #c9ab63;
     --glass: rgb(16 21 26 / 0.94);
@@ -45,6 +45,26 @@
     --bad: #ff8a6b;
     --ok: #5fd49a;
   }
+}
+
+/* The same palette, pinned by the theme switch. */
+:root[data-theme='dark'] {
+    --bed: #3a3121;
+    --bed-lit: #c9ab63;
+    --glass: rgb(16 21 26 / 0.94);
+    --glass-sel: rgb(44 56 67 / 0.97);
+    --pane: #182027;
+    --ink: #f2efe4;
+    --dim: #b4bcc3;
+    --line: rgb(242 239 228 / 0.2);
+    --plate: #070809;
+    --bad: #ff8a6b;
+    --ok: #5fd49a;
+  color-scheme: dark;
+}
+
+:root[data-theme='light'] {
+  color-scheme: light;
 }
 
 * {
@@ -546,50 +566,127 @@ td {
 
 .board {
   grid-column: 1 / -1;
+  overflow: auto;
 }
 
 .board .tools {
   display: flex;
-  gap: calc(var(--u) * 2);
+  gap: calc(var(--u) * 1.5);
   align-items: center;
   padding: calc(var(--u) * 2);
   border-bottom: 1px solid var(--line);
   flex-wrap: wrap;
 }
 
-.board .btn {
+.board .btn,
+.board .chip {
   color: var(--ink);
 }
 
-.board .btn[aria-pressed='true'] {
+.board .btn[aria-pressed='true'],
+.chip[aria-pressed='true'] {
   background: var(--ink);
   color: var(--pane);
   border-color: var(--ink);
 }
 
-.cellbtn {
-  all: unset;
-  cursor: pointer;
-  width: 22px;
-  height: 22px;
-  display: inline-grid;
-  place-content: center;
+.board .search {
+  flex: 1 1 200px;
+  box-sizing: border-box;
+  height: calc(var(--u) * 3.5);
+  padding: 0 var(--u);
+  border: 1px solid var(--line);
+  background: var(--pane);
+  color: var(--ink);
+  font: inherit;
 }
 
-.cellbtn:focus-visible {
+.chip {
+  all: unset;
+  box-sizing: border-box;
+  cursor: pointer;
+  padding: 0 var(--u);
+  height: calc(var(--u) * 3);
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid var(--line);
+  color: var(--dim);
+}
+
+.chip:focus-visible,
+.board .search:focus-visible {
   outline: 2px solid var(--ink);
 }
 
-.cellbtn i {
-  display: block;
-  width: 16px;
-  height: 4px;
-  background: var(--ink);
-  opacity: 0.25;
+.trow {
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr) auto;
+  gap: var(--u);
+  align-items: start;
+  padding: calc(var(--u) * 1.5) calc(var(--u) * 2);
+  border-bottom: 1px solid var(--line);
 }
 
-.cellbtn i.on {
-  opacity: 1;
+.trow.done .ttitle {
+  text-decoration: line-through;
+  color: var(--dim);
+}
+
+.trow .meta {
+  display: flex;
+  gap: var(--u);
+  flex-wrap: wrap;
+  align-items: center;
+  margin-top: 4px;
+  color: var(--dim);
+}
+
+.trow .meta button {
+  all: unset;
+  cursor: pointer;
+  text-decoration: underline;
+}
+
+.trow .meta button:focus-visible {
+  outline: 2px solid var(--ink);
+}
+
+.statusbtn {
+  all: unset;
+  cursor: pointer;
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-content: center;
+}
+
+.statusbtn:focus-visible {
+  outline: 2px solid var(--ink);
+}
+
+.tform {
+  padding: calc(var(--u) * 2);
+  border-bottom: 1px solid var(--line);
+  display: grid;
+  gap: var(--u);
+  max-width: 720px;
+}
+
+.tform textarea {
+  box-sizing: border-box;
+  padding: var(--u);
+  border: 1px solid var(--line);
+  background: var(--pane);
+  color: var(--ink);
+  font: inherit;
+  min-height: 56px;
+  resize: vertical;
+}
+
+.picks {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
 }
 
 .admin-body {
@@ -783,4 +880,17 @@ td {
   font: inherit;
   white-space: pre-wrap;
   color: var(--dim);
+}
+
+.reconnect {
+  position: absolute;
+  right: calc(var(--u) * 2);
+  bottom: calc(var(--u) * 2);
+  background: var(--glass-ink);
+  color: #111418;
+  border-color: var(--glass-ink);
+}
+
+.themebtn {
+  color: inherit;
 }

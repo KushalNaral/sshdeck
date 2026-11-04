@@ -6,17 +6,18 @@ import { Connection } from './components/Connection'
 import { Mark } from './components/Mark'
 import { Analysis } from './components/Analysis'
 import { ConnectBar } from './components/ConnectBar'
-import { PatchBoard } from './components/PatchBoard'
+import { TasksBoard } from './components/TasksBoard'
 import { Palette } from './components/Palette'
 import { Rack } from './components/Rack'
 import { TerminalPane } from './components/TerminalPane'
 import { configStore, messageOf, type Config } from './lib/config'
 import { vpnOf } from './lib/status'
-import type { Analysis as AnalysisData, ContainerTab, Mode, Server, Session, Vpn } from './types'
+import { applyTheme, loadTheme, THEMES } from './lib/theme'
+import type { Analysis as AnalysisData, ContainerTab, Mode, Server, Session, Task, Vpn } from './types'
 
 export default function App() {
   const [mode, setMode] = useState<Mode>('firefight')
-  const [config, setConfig] = useState<Config>({ servers: [], vpns: [] })
+  const [config, setConfig] = useState<Config>({ servers: [], vpns: [], tasks: [] })
   const [loaded, setLoaded] = useState(false)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [selected, setSelected] = useState('')
@@ -26,11 +27,18 @@ export default function App() {
   const [scanErrors, setScanErrors] = useState<Record<string, string>>({})
   const [palette, setPalette] = useState(false)
   const [light, setLight] = useState(0)
+  const [theme, setTheme] = useState(loadTheme)
+  const cycleTheme = () => {
+    const next = THEMES[(THEMES.indexOf(theme) + 1) % THEMES.length]
+    applyTheme(next)
+    setTheme(next)
+  }
 
   const servers = config.servers
   const server = servers.find((s) => s.id === selected) ?? servers[0]
   const vpns = config.vpns
   const latest = useRef(config)
+  const attempts = useRef<Record<string, number>>({}) // connect attempt number per server, so a cancelled attempt's late result is ignored
   latest.current = config
 
   useEffect(() => {
@@ -52,12 +60,16 @@ export default function App() {
     async (id: string) => {
       const sv = latest.current.servers.find((s) => s.id === id)!
       const vpn = latest.current.vpns.find((v) => v.id === sv.vpnId)
+      const n = (attempts.current[id] = (attempts.current[id] ?? 0) + 1)
+      const current = () => attempts.current[id] === n
       setSessions((p) => ({ ...p, [id]: { serverId: id, state: 'connecting', steps: [], tabs: [], activeTab: 0, nextTab: 1 } }))
       setLight((n) => n + 1)
       try {
-        await backend.connect(sv, vpn, (steps) => patch(id, (s) => ({ ...s, steps })))
+        await backend.connect(sv, vpn, (steps) => current() && patch(id, (s) => ({ ...s, steps })))
+        if (!current()) return
         patch(id, (s) => ({ ...s, state: 'live', since: Date.now(), tabs: [1], activeTab: 1, nextTab: 2 }))
       } catch (e) {
+        if (!current()) return
         const err = e instanceof ConnectError ? e : new ConnectError('The connection failed.', 'Try again; if it keeps failing, check the credentials.')
         patch(id, (s) => ({ ...s, state: 'failed', error: { problem: err.problem, recovery: err.recovery } }))
       }
@@ -67,6 +79,7 @@ export default function App() {
   )
 
   const disconnect = (id: string) => {
+    attempts.current[id] = (attempts.current[id] ?? 0) + 1
     backend.disconnect(id)
     setSessions((p) => {
       const { [id]: _, ...rest } = p
@@ -128,7 +141,7 @@ export default function App() {
     attempt(async () => {
       await configStore.deleteServer(id)
       disconnect(id)
-      setConfig((c) => ({ ...c, servers: c.servers.filter((x) => x.id !== id) }))
+      setConfig((c) => ({ ...c, servers: c.servers.filter((x) => x.id !== id), tasks: c.tasks.map((t) => ({ ...t, serverIds: t.serverIds.filter((x) => x !== id) })) }))
       setSelected((cur) => (cur === id ? (latest.current.servers.find((x) => x.id !== id)?.id ?? '') : cur))
     })
   const saveVpn = (v: Vpn, pw: string) =>
@@ -142,11 +155,16 @@ export default function App() {
       setConfig((c) => ({ ...c, vpns: c.vpns.filter((x) => x.id !== id) }))
     })
 
-  // The patch stage is saved with the server, so it survives restarts.
-  const setStage = (id: string, stage: number) => {
-    const sv = latest.current.servers.find((s) => s.id === id)
-    if (sv) void saveServer({ ...sv, stage }, '')
-  }
+  const saveTask = (t: Task) =>
+    attempt(async () => {
+      const saved = await configStore.saveTask(t)
+      setConfig((c) => ({ ...c, tasks: upsert(c.tasks, saved) }))
+    })
+  const deleteTask = (id: string) =>
+    attempt(async () => {
+      await configStore.deleteTask(id)
+      setConfig((c) => ({ ...c, tasks: c.tasks.filter((x) => x.id !== id) }))
+    })
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -154,7 +172,7 @@ export default function App() {
       if (e.key === 'k') (e.preventDefault(), setPalette(true))
       else if (e.key === 't' && sessions[selected]?.state === 'live') (e.preventDefault(), addTab(selected))
       else if (e.key === '1') (e.preventDefault(), setMode('firefight'))
-      else if (e.key === '2') (e.preventDefault(), setMode('patch'))
+      else if (e.key === '2') (e.preventDefault(), setMode('tasks'))
       else if (e.key === '3') (e.preventDefault(), setMode('admin'))
     }
     // Capture phase: xterm stops key events before they bubble, so shortcuts must be caught first.
@@ -176,9 +194,9 @@ export default function App() {
             <Mark kind={mode === 'firefight' ? 'filled' : 'hollow'} />
             <span>A · Firefight</span>
           </button>
-          <button aria-pressed={mode === 'patch'} onClick={() => setMode('patch')}>
-            <Mark kind={mode === 'patch' ? 'filled' : 'hollow'} />
-            <span>B · Patch</span>
+          <button aria-pressed={mode === 'tasks'} onClick={() => setMode('tasks')}>
+            <Mark kind={mode === 'tasks' ? 'filled' : 'hollow'} />
+            <span>B · Tasks</span>
           </button>
           <button aria-pressed={mode === 'admin'} onClick={() => setMode('admin')}>
             <Mark kind={mode === 'admin' ? 'filled' : 'hollow'} />
@@ -196,6 +214,9 @@ export default function App() {
             <kbd>Ctrl 1</kbd> <kbd>2</kbd> <kbd>3</kbd> Job
           </span>
         </div>
+        <button className="btn themebtn" onClick={cycleTheme} title="Switch between system, light and dark" aria-label={`Theme: ${theme}. Switch theme`}>
+          Theme: {theme[0].toUpperCase() + theme.slice(1)}
+        </button>
       </header>
 
       {server && (
@@ -204,6 +225,7 @@ export default function App() {
           servers={servers}
           vpns={vpns}
           sessions={sessions}
+          tasks={config.tasks}
           selected={selected}
           onSelect={setSelected}
           onConnect={(id) => !sessions[id] && void connect(id)}
@@ -231,12 +253,13 @@ export default function App() {
       </main>
       )}
 
-      {mode === 'patch' && (
+      {mode === 'tasks' && (
         <main className="stage">
-          <PatchBoard
+          <TasksBoard
+            tasks={config.tasks}
             servers={servers}
-            vpns={vpns}
-            onStage={setStage}
+            onSave={saveTask}
+            onDelete={deleteTask}
             onOpen={(id) => {
               setSelected(id)
               setMode('firefight')

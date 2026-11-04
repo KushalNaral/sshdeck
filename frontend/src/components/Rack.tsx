@@ -1,18 +1,19 @@
 import { markFor, sentence } from '../lib/status'
-import type { Server, Session, Vpn } from '../types'
-import { Journey, Mark } from './Mark'
+import type { Server, Session, Task, Vpn } from '../types'
+import { Mark } from './Mark'
 
 interface Props {
   servers: Server[]
   vpns: Vpn[]
   sessions: Record<string, Session>
+  tasks: Task[]
   selected: string
   onSelect: (id: string) => void
   onConnect: (id: string) => void
 }
 
 /** VPN groups as raked slides: each server is a slide, groups are headed by their gate. */
-export function Rack({ servers, vpns, sessions, selected, onSelect, onConnect }: Props) {
+export function Rack({ servers, vpns, sessions, tasks, selected, onSelect, onConnect }: Props) {
   return (
     <nav className="rack" aria-label="Servers by VPN">
       {[
@@ -77,7 +78,10 @@ export function Rack({ servers, vpns, sessions, selected, onSelect, onConnect }:
                     </div>
                     <div className="row2">
                       <span className="trunc">{sentence(s, vpns, sess)}</span>
-                      <Journey stage={s.stage} />
+                      {(() => {
+                        const n = tasks.filter((t) => t.status !== 'done' && t.serverIds.includes(s.id)).length
+                        return n > 0 && <span title="Open tasks">{n} task{n === 1 ? '' : 's'}</span>
+                      })()}
                     </div>
                   </div>
                 </div>

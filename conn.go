@@ -133,13 +133,17 @@ func (a *App) Connect(serverID string) ConnectResult {
 
 	t := time.Now()
 	set("ssh", func(s *Step) { s.Status = "run" })
-	pw, err := a.st.Password("server", sv.ID)
+	pw, err := a.serverSecret(sv)
 	if err != nil {
 		set("ssh", func(s *Step) { s.Status = "fail" })
 		return fail("No password is stored for "+sv.Name+".", "Open Admin, edit the server and enter its password.")
 	}
 	sess, err := a.open(ctx, sv, pw)
 	if err != nil {
+		if ctx.Err() != nil {
+			a.releaseVPN(vp)
+			return cancelled()
+		}
 		set("ssh", func(s *Step) { s.Status = "fail" })
 		return sshFailure(err)
 	}
@@ -151,13 +155,37 @@ func (a *App) Connect(serverID string) ConnectResult {
 		c.vpnID = vp.ID
 	}
 	a.mu.Lock()
+	if ctx.Err() != nil { // cancelled just as SSH finished: Disconnect cancels under this same lock
+		a.mu.Unlock()
+		sess.Close()
+		a.releaseVPN(vp)
+		return cancelled()
+	}
 	a.conns[serverID] = c
 	a.mu.Unlock()
 	return ConnectResult{OK: true}
 }
 
+func cancelled() ConnectResult { return fail("Cancelled.", "Connect again when you are ready.") }
+
+// releaseVPN takes a VPN down after a connect that was cancelled, unless another server is using it.
+func (a *App) releaseVPN(vp *store.VPN) {
+	if vp == nil {
+		return
+	}
+	a.mu.Lock()
+	for _, o := range a.conns {
+		if o.vpnID == vp.ID {
+			a.mu.Unlock()
+			return
+		}
+	}
+	a.mu.Unlock()
+	_ = a.vpn.Down(vp.ID)
+}
+
 func (a *App) vpnUp(ctx context.Context, v store.VPN, set func(string, func(*Step))) (ConnectResult, bool) {
-	tool := map[store.VPNKind]string{store.Forti: "openfortivpn", store.GP: "openconnect"}[v.Kind]
+	tool := vpn.Tool(v.Kind)
 	if _, err := a.lookPath(tool); err != nil {
 		set("vpn", func(s *Step) { s.Status = "fail" })
 		return fail(tool+" is not installed, so "+v.Name+" cannot start.", "Open Admin, System, and install it. Then connect again."), true
@@ -188,12 +216,25 @@ func (a *App) vpnUp(ctx context.Context, v store.VPN, set func(string, func(*Ste
 	return ConnectResult{}, false
 }
 
+// serverSecret is the stored password, or for key login the key's passphrase, which may be empty (no passphrase, or ssh-agent).
+func (a *App) serverSecret(sv store.Server) (string, error) {
+	pw, err := a.st.Password("server", sv.ID)
+	if err != nil && sv.Auth == "key" && errors.Is(err, store.ErrNotFound) {
+		return "", nil
+	}
+	return pw, err
+}
+
 // sshFailure turns an sshx error into the problem and recovery the UI shows.
 func sshFailure(err error) ConnectResult {
 	msg := err.Error()
 	switch {
 	case strings.Contains(msg, "wrong user or password"):
 		return fail("The server refused the login: wrong user or password.", "Fix the user or password in Admin, then connect again.")
+	case strings.Contains(msg, "did not accept the key"):
+		return fail("The server did not accept the key.", "Add the public key to the user's authorized_keys on the server, or pick another key file in Admin.")
+	case strings.Contains(msg, "passphrase") || strings.Contains(msg, "key file") || strings.Contains(msg, "ssh-agent"):
+		return fail(msg, "Fix the key settings for this server in Admin, then connect again.")
 	case strings.Contains(msg, "cannot reach"):
 		return fail("The server cannot be reached. "+msg, "Check the host and port, and that the VPN is up.")
 	case strings.Contains(msg, "host key"):
@@ -320,7 +361,7 @@ func (a *App) Analyze(serverID string) (probe.Report, error) {
 	if !ok {
 		return probe.Report{}, errors.New("that server no longer exists")
 	}
-	pw, err := a.st.Password("server", sv.ID)
+	pw, err := a.serverSecret(sv)
 	if err != nil {
 		return probe.Report{}, errors.New("no password is stored for " + sv.Name)
 	}
@@ -353,7 +394,7 @@ func (a *App) ensureShell(serverID string, c *conn, tab int) (*shell, error) {
 	if !ok {
 		return nil, errors.New("that server no longer exists")
 	}
-	pw, err := a.st.Password("server", sv.ID)
+	pw, err := a.serverSecret(sv)
 	if err != nil {
 		return nil, err
 	}

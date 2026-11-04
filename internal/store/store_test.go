@@ -146,3 +146,92 @@ func TestTrustedCertMustBeASha256Digest(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestTaskValidationAndRoundTrip(t *testing.T) {
+	s, _, path := open(t)
+	if _, err := s.SaveTask(Task{}); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("empty title: %v", err)
+	}
+	if _, err := s.SaveTask(Task{Title: "x", Status: "later"}); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("bad status: %v", err)
+	}
+	if _, err := s.SaveTask(Task{Title: "x", ServerIDs: []string{"nope"}}); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("unknown server: %v", err)
+	}
+	if _, err := s.SaveTask(Task{Title: "x", Due: "next week"}); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("bad due date: %v", err)
+	}
+	sv, _ := s.SaveServer(good, "pw")
+	tk, err := s.SaveTask(Task{Title: " Upgrade PHP ", Tags: []string{"PHP", "php", " urgent ", ""}, ServerIDs: []string{sv.ID}, Due: "2026-12-01"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tk.ID == "" || tk.Status != "todo" || tk.Title != "Upgrade PHP" || strings.Join(tk.Tags, ",") != "php,urgent" {
+		t.Fatalf("not normalised: %+v", tk)
+	}
+	s2, err := Open(path, memSecrets{})
+	if err != nil || len(s2.Tasks()) != 1 {
+		t.Fatalf("reopen: %v %v", err, s2.Tasks())
+	}
+}
+
+func TestDeletingAServerUnlinksItsTasks(t *testing.T) {
+	s, _, _ := open(t)
+	sv, _ := s.SaveServer(good, "pw")
+	tk, _ := s.SaveTask(Task{Title: "Patch", ServerIDs: []string{sv.ID}})
+	if err := s.DeleteServer(sv.ID); err != nil {
+		t.Fatal(err)
+	}
+	if got := s.Tasks(); len(got) != 1 || got[0].ID != tk.ID || len(got[0].ServerIDs) != 0 {
+		t.Fatalf("task should stay, unlinked: %+v", got)
+	}
+	if err := s.DeleteTask(tk.ID); err != nil || len(s.Tasks()) != 0 {
+		t.Fatalf("delete: %v", err)
+	}
+	if err := s.DeleteTask(tk.ID); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("second delete: %v", err)
+	}
+}
+
+func TestFieldsThatCouldInjectIntoAClientAreRefused(t *testing.T) {
+	s, _, _ := open(t)
+	vpn := VPN{Name: "V", Kind: Forti, Gateway: "gw.example.org", Port: 443, User: "u"}
+	for name, mut := range map[string]func(v *VPN){
+		"gateway starts with a dash": func(v *VPN) { v.Gateway = "--script=/tmp/x" },
+		"gateway has a space":        func(v *VPN) { v.Gateway = "gw example" },
+		"gateway has a newline":      func(v *VPN) { v.Gateway = "gw\nhost = evil" },
+		"user has a newline":         func(v *VPN) { v.User = "u\npppd-plugin = x" },
+		"user starts with a dash":    func(v *VPN) { v.User = "-u" },
+	} {
+		v := vpn
+		mut(&v)
+		if _, err := s.SaveVPN(v, "pw"); !errors.Is(err, ErrInvalid) {
+			t.Errorf("%s: saved (%v)", name, err)
+		}
+	}
+	if _, err := s.SaveVPN(vpn, "line1\nline2"); !errors.Is(err, ErrInvalid) {
+		t.Errorf("a VPN password with a newline was accepted: %v", err)
+	}
+	if _, err := s.SaveVPN(vpn, "p@ss w0rd!#'\"$"); err != nil {
+		t.Errorf("an ordinary password with symbols must stay valid: %v", err)
+	}
+	for name, mut := range map[string]func(sv *Server){
+		"host starts with a dash": func(sv *Server) { sv.Host = "-oProxyCommand=x" },
+		"host has a space":        func(sv *Server) { sv.Host = "a b" },
+		"user has a newline":      func(sv *Server) { sv.User = "root\nx" },
+		"user starts with a dash": func(sv *Server) { sv.User = "-l" },
+	} {
+		sv := good
+		mut(&sv)
+		if _, err := s.SaveServer(sv, "pw"); !errors.Is(err, ErrInvalid) {
+			t.Errorf("server, %s: saved (%v)", name, err)
+		}
+	}
+	for _, host := range []string{"10.0.0.5", "web-1.example.org", "fe80::1", "host_name"} {
+		sv := good
+		sv.Host = host
+		if _, err := s.SaveServer(sv, "pw"); err != nil {
+			t.Errorf("host %q should be valid: %v", host, err)
+		}
+	}
+}
