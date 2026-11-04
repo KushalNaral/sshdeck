@@ -235,3 +235,22 @@ func TestFieldsThatCouldInjectIntoAClientAreRefused(t *testing.T) {
 		}
 	}
 }
+
+func TestProductionFlagRoundTrips(t *testing.T) {
+	s, _, path := open(t)
+	sv := good
+	sv.Production = true
+	saved, err := s.SaveServer(sv, "pw")
+	if err != nil || !saved.Production {
+		t.Fatalf("%+v %v", saved, err)
+	}
+	s2, err := Open(path, memSecrets{})
+	if err != nil || !s2.Servers()[0].Production {
+		t.Fatalf("production flag lost on reopen: %v", err)
+	}
+	other := good
+	other.Name = "Staging"
+	if saved2, _ := s.SaveServer(other, "pw"); saved2.Production {
+		t.Error("a server defaults to not production")
+	}
+}

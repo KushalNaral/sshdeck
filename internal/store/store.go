@@ -14,6 +14,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/KushalNaral/sshdeck/internal/vault"
 )
 
 type VPNKind string
@@ -30,10 +32,11 @@ type Server struct {
 	Host        string   `json:"host"`
 	Port        int      `json:"port"`
 	User        string   `json:"user"`
-	Auth        string   `json:"auth"`  // "password" or "key"
+	Auth        string   `json:"auth"`              // "password" or "key"
 	KeyPath     string   `json:"keyPath,omitempty"` // key auth: private key file; empty means use ssh-agent. The passphrase, if any, is the stored secret.
-	VPNID       string   `json:"vpnId"` // empty means direct, unless VPNRequired
+	VPNID       string   `json:"vpnId"`             // empty means direct, unless VPNRequired
 	VPNRequired bool     `json:"vpnRequired,omitempty"`
+	Production  bool     `json:"production,omitempty"` // the UI asks before connecting and before root container shells
 	OS          string   `json:"os,omitempty"`
 	PHP         string   `json:"php,omitempty"`
 	PHPTarget   string   `json:"phpTarget,omitempty"`
@@ -78,6 +81,7 @@ type Secrets interface {
 var (
 	ErrNotFound = errors.New("not found")
 	ErrInvalid  = errors.New("invalid")
+	ErrLocked   = errors.New("sshdeck is locked: enter the passphrase")
 )
 
 // VPNInUseError says which servers block a VPN delete.
@@ -91,6 +95,8 @@ type fileData struct {
 	Servers []Server `json:"servers"`
 	VPNs    []VPN    `json:"vpns"`
 	Tasks   []Task   `json:"tasks,omitempty"`
+	// Secrets holds passwords when the vault is enabled (see vault.go); otherwise they live in the OS keyring.
+	Secrets map[string]string `json:"secrets,omitempty"`
 }
 
 type Store struct {
@@ -98,6 +104,13 @@ type Store struct {
 	path string
 	sec  Secrets
 	d    fileData
+
+	// Vault mode (vault.go): the file is encrypted, secrets live inside it, and the store can be locked.
+	vaultMode bool
+	locked    bool
+	key       *vault.Key
+	fails     int       // wrong passphrases in a row
+	until     time.Time // no unlock attempts before this
 }
 
 // Open loads the file at path, or starts empty when it does not exist yet.
@@ -130,7 +143,43 @@ func (s *Store) VPNs() []VPN {
 
 // Password returns the stored password for a server or VPN. kind is "server" or "vpn".
 func (s *Store) Password(kind, id string) (string, error) {
+	s.mu.Lock()
+	if s.locked {
+		s.mu.Unlock()
+		return "", ErrLocked
+	}
+	if s.vaultMode {
+		defer s.mu.Unlock()
+		if v, ok := s.d.Secrets[kind+"/"+id]; ok {
+			return v, nil
+		}
+		return "", ErrNotFound
+	}
+	s.mu.Unlock()
 	return s.sec.Get(kind + "/" + id)
+}
+
+// setSecret and delSecret are called with s.mu held. They write to the vault map or the keyring.
+func (s *Store) setSecret(key, secret string) error {
+	if s.vaultMode {
+		if s.d.Secrets == nil {
+			s.d.Secrets = map[string]string{}
+		}
+		s.d.Secrets[key] = secret
+		return nil
+	}
+	return s.sec.Set(key, secret)
+}
+
+func (s *Store) delSecret(key string) error {
+	if s.vaultMode {
+		delete(s.d.Secrets, key)
+		return nil
+	}
+	if err := s.sec.Delete(key); err != nil && !errors.Is(err, ErrNotFound) {
+		return err
+	}
+	return nil
 }
 
 // hostRe allows host names, IPv4 and IPv6 literals; it cannot start with "-", which a client would read as an option.
@@ -194,6 +243,9 @@ func validPort(p int) bool { return p >= 1 && p <= 65535 }
 func (s *Store) SaveServer(sv Server, password string) (Server, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.locked {
+		return sv, ErrLocked
+	}
 	switch {
 	case sv.Name == "":
 		return sv, invalid("name is required")
@@ -223,7 +275,7 @@ func (s *Store) SaveServer(sv Server, password string) (Server, error) {
 		sv.ID = newID(sv.Name)
 	}
 	if password != "" {
-		if err := s.sec.Set("server/"+sv.ID, password); err != nil {
+		if err := s.setSecret("server/"+sv.ID, password); err != nil {
 			return sv, fmt.Errorf("store password: %w", err)
 		}
 	}
@@ -238,6 +290,9 @@ func (s *Store) SaveServer(sv Server, password string) (Server, error) {
 func (s *Store) DeleteServer(id string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.locked {
+		return ErrLocked
+	}
 	i := s.serverIndex(id)
 	if i < 0 {
 		return ErrNotFound
@@ -246,7 +301,7 @@ func (s *Store) DeleteServer(id string) error {
 	for j := range s.d.Tasks {
 		s.d.Tasks[j].ServerIDs = without(s.d.Tasks[j].ServerIDs, id)
 	}
-	if err := s.sec.Delete("server/" + id); err != nil && !errors.Is(err, ErrNotFound) {
+	if err := s.delSecret("server/" + id); err != nil {
 		return err
 	}
 	return s.flush()
@@ -255,6 +310,9 @@ func (s *Store) DeleteServer(id string) error {
 func (s *Store) SaveVPN(v VPN, password string) (VPN, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.locked {
+		return v, ErrLocked
+	}
 	switch {
 	case v.Name == "":
 		return v, invalid("name is required")
@@ -274,7 +332,7 @@ func (s *Store) SaveVPN(v VPN, password string) (VPN, error) {
 		v.ID = newID(v.Name)
 	}
 	if password != "" {
-		if err := s.sec.Set("vpn/"+v.ID, password); err != nil {
+		if err := s.setSecret("vpn/"+v.ID, password); err != nil {
 			return v, fmt.Errorf("store password: %w", err)
 		}
 	}
@@ -289,6 +347,9 @@ func (s *Store) SaveVPN(v VPN, password string) (VPN, error) {
 func (s *Store) DeleteVPN(id string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.locked {
+		return ErrLocked
+	}
 	i := s.vpnIndex(id)
 	if i < 0 {
 		return ErrNotFound
@@ -303,7 +364,7 @@ func (s *Store) DeleteVPN(id string) error {
 		return VPNInUseError{Servers: n}
 	}
 	s.d.VPNs = append(s.d.VPNs[:i], s.d.VPNs[i+1:]...)
-	if err := s.sec.Delete("vpn/" + id); err != nil && !errors.Is(err, ErrNotFound) {
+	if err := s.delSecret("vpn/" + id); err != nil {
 		return err
 	}
 	return s.flush()
@@ -319,6 +380,9 @@ func (s *Store) Tasks() []Task {
 func (s *Store) SaveTask(t Task) (Task, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.locked {
+		return t, ErrLocked
+	}
 	t.Title = strings.TrimSpace(t.Title)
 	if t.Status == "" {
 		t.Status = "todo"
@@ -369,6 +433,9 @@ func (s *Store) SaveTask(t Task) (Task, error) {
 func (s *Store) DeleteTask(id string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.locked {
+		return ErrLocked
+	}
 	i := s.taskIndex(id)
 	if i < 0 {
 		return ErrNotFound
@@ -414,16 +481,26 @@ func (s *Store) vpnIndex(id string) int {
 	return -1
 }
 
-// flush writes atomically with owner-only permissions: write a temp file, then rename over the real one.
+// flush saves everything. In vault mode the JSON is encrypted first.
 func (s *Store) flush() error {
 	b, err := json.MarshalIndent(s.d, "", "  ")
 	if err != nil {
 		return err
 	}
-	if err := os.MkdirAll(filepath.Dir(s.path), 0o700); err != nil {
+	if s.vaultMode {
+		if b, err = s.key.Seal(b); err != nil {
+			return err
+		}
+	}
+	return writeAtomic(s.path, b)
+}
+
+// writeAtomic writes with owner-only permissions: write a temp file, then rename over the real one.
+func writeAtomic(path string, b []byte) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return err
 	}
-	tmp, err := os.CreateTemp(filepath.Dir(s.path), ".data-*.json")
+	tmp, err := os.CreateTemp(filepath.Dir(path), ".data-*.tmp")
 	if err != nil {
 		return err
 	}
@@ -439,5 +516,5 @@ func (s *Store) flush() error {
 	if err := tmp.Close(); err != nil {
 		return err
 	}
-	return os.Rename(tmp.Name(), s.path)
+	return os.Rename(tmp.Name(), path)
 }

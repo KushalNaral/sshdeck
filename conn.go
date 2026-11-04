@@ -29,6 +29,7 @@ type ConnectResult struct {
 	OK       bool   `json:"ok"`
 	Problem  string `json:"problem,omitempty"`
 	Recovery string `json:"recovery,omitempty"`
+	quiet    bool   // not an attempt worth recording in the audit trail
 }
 
 type shell struct {
@@ -56,19 +57,46 @@ func (a *App) server(id string) (store.Server, bool) {
 
 // Connect brings the VPN up if the server needs one, logs in over SSH and holds the first shell open.
 // Progress arrives as "connect:<serverId>" events carrying the Step list.
+// Connect brings up the VPN if the server needs one, then SSH, and records the outcome in the audit trail.
 func (a *App) Connect(serverID string) ConnectResult {
+	r := a.connect(serverID)
+	if r.quiet {
+		return r
+	}
+	name, via := a.serverName(serverID), "direct"
+	if sv, ok := a.server(serverID); ok && sv.VPNID != "" {
+		via = "via " + a.vpnName(sv.VPNID)
+	}
+	switch {
+	case r.OK:
+		a.audit("connect", name, via)
+	case r.Problem == "Cancelled.":
+		a.audit("connect.cancel", name, via)
+	default:
+		a.audit("connect.fail", name, r.Problem)
+	}
+	return r
+}
+
+// quiet marks results that are not an attempt worth recording (locked, unknown server, already connected).
+func quiet(r ConnectResult) ConnectResult { r.quiet = true; return r }
+
+func (a *App) connect(serverID string) ConnectResult {
+	if a.isLocked() {
+		return quiet(fail("sshdeck is locked.", "Enter the passphrase, then connect."))
+	}
 	sv, ok := a.server(serverID)
 	if !ok {
-		return fail("That server no longer exists.", "Pick another server.")
+		return quiet(fail("That server no longer exists.", "Pick another server."))
 	}
 	a.mu.Lock()
 	if a.conns[serverID] != nil {
 		a.mu.Unlock()
-		return ConnectResult{OK: true}
+		return quiet(ConnectResult{OK: true})
 	}
 	if a.cancels[serverID] != nil {
 		a.mu.Unlock()
-		return fail("Already connecting to "+sv.Name+".", "Wait for it to finish, or disconnect first.")
+		return quiet(fail("Already connecting to "+sv.Name+".", "Wait for it to finish, or disconnect first."))
 	}
 	ctx, cancel := context.WithCancel(a.ctx)
 	a.cancels[serverID] = cancel
@@ -182,6 +210,7 @@ func (a *App) releaseVPN(vp *store.VPN) {
 	}
 	a.mu.Unlock()
 	_ = a.vpn.Down(vp.ID)
+	a.audit("vpn.down", vp.Name, "connect cancelled")
 }
 
 func (a *App) vpnUp(ctx context.Context, v store.VPN, set func(string, func(*Step))) (ConnectResult, bool) {
@@ -213,6 +242,7 @@ func (a *App) vpnUp(ctx context.Context, v store.VPN, set func(string, func(*Ste
 		return fail(fmt.Sprintf("%s did not come up: %v", v.Name, err), recovery), true
 	}
 	set("vpn", func(s *Step) { s.Status, s.Ms = "done", time.Since(t).Milliseconds() })
+	a.audit("vpn.up", v.Name, "")
 	return ConnectResult{}, false
 }
 
@@ -278,8 +308,10 @@ func (a *App) Disconnect(serverID string) {
 	for _, sh := range c.shells {
 		sh.s.Close()
 	}
+	a.audit("disconnect", a.serverName(serverID), "")
 	if c.vpnID != "" && !inUse {
 		_ = a.vpn.Down(c.vpnID)
+		a.audit("vpn.down", a.vpnName(c.vpnID), "")
 	}
 }
 
@@ -290,6 +322,9 @@ func shellEvent(serverID string, tab int, kind string) string {
 // AttachShell starts streaming a shell's output as "term:<serverId>:<tab>:out" events (base64) and sets its size.
 // Tab 1 already exists from Connect; any other tab is opened here. Call it after subscribing to the events.
 func (a *App) AttachShell(serverID string, tab, cols, rows int) error {
+	if err := a.guard(); err != nil {
+		return err
+	}
 	a.mu.Lock()
 	c := a.conns[serverID]
 	a.mu.Unlock()
@@ -331,12 +366,19 @@ func (a *App) shell(serverID string, tab int) *shell {
 }
 
 func (a *App) TermWrite(serverID string, tab int, data string) {
+	if a.isLocked() {
+		return
+	}
+	a.Touch()
 	if sh := a.shell(serverID, tab); sh != nil {
 		_ = sh.s.Write([]byte(data))
 	}
 }
 
 func (a *App) TermResize(serverID string, tab, cols, rows int) {
+	if a.isLocked() {
+		return
+	}
 	if sh := a.shell(serverID, tab); sh != nil {
 		_ = sh.s.Resize(cols, rows)
 	}
@@ -357,6 +399,9 @@ func (a *App) CloseShell(serverID string, tab int) {
 
 // Analyze runs the read-only probe commands on a server. The server must be reachable (VPN up if it needs one).
 func (a *App) Analyze(serverID string) (probe.Report, error) {
+	if err := a.guard(); err != nil {
+		return probe.Report{}, err
+	}
 	sv, ok := a.server(serverID)
 	if !ok {
 		return probe.Report{}, errors.New("that server no longer exists")
@@ -405,13 +450,15 @@ func (a *App) ensureShell(serverID string, c *conn, tab int) (*shell, error) {
 		return nil, err
 	}
 	a.mu.Lock()
-	defer a.mu.Unlock()
 	if cur := c.shells[tab]; cur != nil { // lost a race with another attach; keep the first
+		a.mu.Unlock()
 		s.Close()
 		return cur, nil
 	}
 	sh = &shell{s: s}
 	c.shells[tab] = sh
+	a.mu.Unlock()
+	a.audit("shell.open", sv.Name, fmt.Sprintf("tab %d", tab))
 	return sh, nil
 }
 
@@ -443,6 +490,9 @@ func dockerExec(container, user string, sudo bool) (string, error) {
 // OpenContainerShell opens tab as an SSH session that drops straight into a running container.
 // user "" means the container's default user; "root" is the admin user. Then call AttachShell for the tab.
 func (a *App) OpenContainerShell(serverID string, tab int, container, user string, sudo bool) error {
+	if err := a.guard(); err != nil {
+		return err
+	}
 	line, err := dockerExec(container, user, sudo)
 	if err != nil {
 		return err
@@ -457,5 +507,9 @@ func (a *App) OpenContainerShell(serverID string, tab int, container, user strin
 	if err != nil {
 		return err
 	}
-	return sh.s.Write([]byte(line))
+	if err := sh.s.Write([]byte(line)); err != nil {
+		return err
+	}
+	a.audit("container.exec", a.serverName(serverID), fmt.Sprintf("container=%s user=%s sudo=%t", container, user, sudo))
+	return nil
 }

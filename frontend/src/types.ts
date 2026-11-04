@@ -28,6 +28,8 @@ export interface Server {
   /** Profile used to reach this server; null means direct, unless vpnRequired says one is needed but not set. */
   vpnId: string | null
   vpnRequired?: boolean
+  /** Production server: the app asks before connecting and before a root container shell. */
+  production?: boolean
   os: string
   php: string
   phpTarget: string

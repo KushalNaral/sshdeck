@@ -39,6 +39,7 @@ export function ConnectBar({ server, vpn, session, onConnect, onDisconnect, onMa
       )}
 
       <div className="msg" style={{ marginLeft: 'auto' }}>
+        {server.production && <span className="prod" title="Production server: be careful what you run">PRODUCTION</span>}
         {session?.state === 'live' && (
           <>
             <span className="good label">Live</span>

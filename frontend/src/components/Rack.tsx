@@ -63,6 +63,7 @@ export function Rack({ servers, vpns, sessions, tasks, selected, onSelect, onCon
                     <div className="row1">
                       <Mark kind={markFor(s, sess)} />
                       <span className="name trunc">{s.name}</span>
+                      {s.production && <span className="prod" title="Production server">PROD</span>}
                       {!live && sess?.state !== 'connecting' && (
                         <button
                           className="btn"

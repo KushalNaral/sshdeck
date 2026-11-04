@@ -2,6 +2,8 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { ConnectError } from './api'
 import { backend } from './backend'
 import { Admin } from './components/Admin'
+import { LockScreen } from './components/LockScreen'
+import { Confirm } from './components/Confirm'
 import { Connection } from './components/Connection'
 import { Mark } from './components/Mark'
 import { Analysis } from './components/Analysis'
@@ -10,8 +12,10 @@ import { TasksBoard } from './components/TasksBoard'
 import { Palette } from './components/Palette'
 import { Rack } from './components/Rack'
 import { TerminalPane } from './components/TerminalPane'
+import { auditApi } from './lib/audit'
 import { configStore, messageOf, type Config } from './lib/config'
 import { vpnOf } from './lib/status'
+import { lockApi, type LockState } from './lib/lock'
 import { applyTheme, loadTheme, THEMES } from './lib/theme'
 import type { Analysis as AnalysisData, ContainerTab, Mode, Server, Session, Task, Vpn } from './types'
 
@@ -19,6 +23,7 @@ export default function App() {
   const [mode, setMode] = useState<Mode>('firefight')
   const [config, setConfig] = useState<Config>({ servers: [], vpns: [], tasks: [] })
   const [loaded, setLoaded] = useState(false)
+  const [lock, setLock] = useState<LockState | null>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [selected, setSelected] = useState('')
   const [sessions, setSessions] = useState<Record<string, Session>>({})
@@ -27,6 +32,7 @@ export default function App() {
   const [scanErrors, setScanErrors] = useState<Record<string, string>>({})
   const [palette, setPalette] = useState(false)
   const [light, setLight] = useState(0)
+  const [ask, setAsk] = useState<{ title: string; body: string; label: string; run: () => void } | null>(null)
   const [theme, setTheme] = useState(loadTheme)
   const cycleTheme = () => {
     const next = THEMES[(THEMES.indexOf(theme) + 1) % THEMES.length]
@@ -41,7 +47,20 @@ export default function App() {
   const attempts = useRef<Record<string, number>>({}) // connect attempt number per server, so a cancelled attempt's late result is ignored
   latest.current = config
 
+  const lockRef = useRef(lock)
+  lockRef.current = lock
+
+  // The lock state comes first: nothing is loaded while the app is locked.
   useEffect(() => {
+    lockApi.state().then(setLock).catch((e) => setLoadError(messageOf(e)))
+    return lockApi.onLocked(() => {
+      if (lockRef.current?.endOnLock) setSessions({}) // Go ended the shells and VPNs too
+      setLock((s) => s && { ...s, locked: true })
+    })
+  }, [])
+
+  useEffect(() => {
+    if (!lock || lock.locked || loaded) return
     configStore
       .load()
       .then((c) => {
@@ -51,7 +70,33 @@ export default function App() {
         setLoaded(true)
       })
       .catch((e) => setLoadError(messageOf(e)))
-  }, [])
+  }, [lock, loaded])
+
+  const unlock = async (pass: string) => {
+    try {
+      await lockApi.unlock(pass)
+      setLock(await lockApi.state())
+      return null
+    } catch (e) {
+      return messageOf(e)
+    }
+  }
+
+  // Tell Go the user is active (it owns the idle timer). Capture phase, because xterm stops key events.
+  useEffect(() => {
+    if (!lock?.enabled || lock.locked) return
+    let last = 0
+    const ping = () => {
+      const t = Date.now()
+      if (t - last > 15000) {
+        last = t
+        lockApi.touch()
+      }
+    }
+    const evs = ['keydown', 'pointerdown', 'wheel'] as const
+    evs.forEach((e) => window.addEventListener(e, ping, true))
+    return () => evs.forEach((e) => window.removeEventListener(e, ping, true))
+  }, [lock?.enabled, lock?.locked])
 
   // shortcut: a connect still in flight when its session is dropped is ignored, not cancelled; cancel via the Go side later.
   const patch = useCallback((id: string, fn: (s: Session) => Session) => setSessions((p) => (p[id] ? { ...p, [id]: fn(p[id]) } : p)), [])
@@ -92,6 +137,28 @@ export default function App() {
       patch(id, (s) => ({ ...s, tabs: [...s.tabs, s.nextTab], activeTab: s.nextTab, nextTab: s.nextTab + 1, tabInfo: info ? { ...s.tabInfo, [s.nextTab]: info } : s.tabInfo })),
     [patch],
   )
+  // Production servers ask first. The confirmation is written to the audit trail, then the action runs.
+  const requestConnect = (id: string) => {
+    const sv = latest.current.servers.find((x) => x.id === id)
+    if (!sv?.production) return void connect(id)
+    setAsk({
+      title: `Connect to ${sv.name}?`,
+      body: `${sv.name} is a production server. You will be signed in as ${sv.user}@${sv.host}.`,
+      label: 'Connect to production',
+      run: () => (auditApi.confirm(id, 'connect'), void connect(id)),
+    })
+  }
+  const requestExec = (id: string, c: ContainerTab) => {
+    const sv = latest.current.servers.find((x) => x.id === id)
+    const asRoot = c.sudo || c.user === '' || c.user === 'root' || c.user === '0'
+    if (!sv?.production || !asRoot) return addTab(id, c)
+    setAsk({
+      title: `Open a root shell in ${c.container}?`,
+      body: `${sv.name} is a production server. This opens ${c.container} as ${c.sudo ? 'root with sudo' : c.user || 'its default user (usually root)'}.`,
+      label: 'Open root shell',
+      run: () => (auditApi.confirm(id, 'container'), addTab(id, c)),
+    })
+  }
   const closeTab = (id: string, tab: number) =>
     patch(id, (s) => {
       const tabs = s.tabs.filter((t) => t !== tab)
@@ -171,6 +238,7 @@ export default function App() {
       if (!e.ctrlKey) return
       if (e.key === 'k') (e.preventDefault(), setPalette(true))
       else if (e.key === 't' && sessions[selected]?.state === 'live') (e.preventDefault(), addTab(selected))
+      else if (e.key === 'l' && lockRef.current?.enabled) (e.preventDefault(), void lockApi.lock())
       else if (e.key === '1') (e.preventDefault(), setMode('firefight'))
       else if (e.key === '2') (e.preventDefault(), setMode('tasks'))
       else if (e.key === '3') (e.preventDefault(), setMode('admin'))
@@ -182,10 +250,13 @@ export default function App() {
 
   const sess = sessions[selected]
 
-  if (!loaded) return <div className="app">{loadError ? <p className="bad" role="alert" style={{ padding: 24 }}>Could not load your servers: {loadError}</p> : null}</div>
+  const failed = loadError ? <p className="bad" role="alert" style={{ padding: 24 }}>Could not load your servers: {loadError}</p> : null
+  if (lock === null) return <div className="app">{failed}</div>
+  if (!loaded) return <div className="app">{lock.locked ? <LockScreen onUnlock={unlock} /> : failed}</div>
 
   return (
-    <div className="app">
+    <>
+    <div className="app" inert={lock.locked}>
       {light > 0 && <div key={light} className="light" aria-hidden />}
       <header className="top">
         <h1 className="brand">sshdeck</h1>
@@ -214,6 +285,11 @@ export default function App() {
             <kbd>Ctrl 1</kbd> <kbd>2</kbd> <kbd>3</kbd> Job
           </span>
         </div>
+        {lock.enabled && (
+          <button className="btn themebtn" onClick={() => void lockApi.lock()} title="Lock now (Ctrl L)">
+            Lock
+          </button>
+        )}
         <button className="btn themebtn" onClick={cycleTheme} title="Switch between system, light and dark" aria-label={`Theme: ${theme}. Switch theme`}>
           Theme: {theme[0].toUpperCase() + theme.slice(1)}
         </button>
@@ -228,14 +304,14 @@ export default function App() {
           tasks={config.tasks}
           selected={selected}
           onSelect={setSelected}
-          onConnect={(id) => !sessions[id] && void connect(id)}
+          onConnect={(id) => !sessions[id] && requestConnect(id)}
         />
         <div className="center">
           <ConnectBar
             server={server}
             vpn={vpnOf(server, vpns)}
             session={sess}
-            onConnect={() => void connect(selected)}
+            onConnect={() => requestConnect(selected)}
             onDisconnect={() => disconnect(selected)}
             onManualDone={() => backend.confirmManualVpn(selected)}
           />
@@ -249,7 +325,7 @@ export default function App() {
             onCloseTab={closeTab}
           />
         </div>
-        <Analysis server={server} data={analysis[selected]} scanning={scanning === selected} error={scanErrors[selected]} connected={live} onExec={(c) => addTab(selected, c)} onRescan={() => void scan(selected)} connection={<Connection server={server} vpns={vpns} session={sess} />} />
+        <Analysis server={server} data={analysis[selected]} scanning={scanning === selected} error={scanErrors[selected]} connected={live} onExec={(c) => requestExec(selected, c)} onRescan={() => void scan(selected)} connection={<Connection server={server} vpns={vpns} session={sess} />} />
       </main>
       )}
 
@@ -270,7 +346,7 @@ export default function App() {
 
       {mode === 'admin' && (
         <main className="stage">
-          <Admin servers={servers} vpns={vpns} onSaveServer={saveServer} onDeleteServer={deleteServer} onSaveVpn={saveVpn} onDeleteVpn={deleteVpn} />
+          <Admin servers={servers} vpns={vpns} lock={lock} onLockChange={setLock} onSaveServer={saveServer} onDeleteServer={deleteServer} onSaveVpn={saveVpn} onDeleteVpn={deleteVpn} />
         </main>
       )}
 
@@ -284,10 +360,25 @@ export default function App() {
             setPalette(false)
             setMode('firefight')
             setSelected(id)
-            if (go && !sessions[id]) void connect(id)
+            if (go && !sessions[id]) requestConnect(id)
           }}
         />
       )}
     </div>
+    {ask && !lock.locked && (
+      <Confirm
+        title={ask.title}
+        body={ask.body}
+        confirmLabel={ask.label}
+        onCancel={() => setAsk(null)}
+        onConfirm={() => {
+          const run = ask.run
+          setAsk(null)
+          run()
+        }}
+      />
+    )}
+    {lock.locked && <LockScreen onUnlock={unlock} />}
+    </>
   )
 }

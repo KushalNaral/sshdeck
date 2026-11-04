@@ -2,14 +2,19 @@ import { useState } from 'react'
 import { viaLabel } from '../lib/status'
 import type { Server, Vpn, VpnKind } from '../types'
 import { VPN_LABEL } from '../types'
+import { AuditPanel } from './AuditPanel'
+import { SecurityPanel } from './SecurityPanel'
 import { SystemPanel } from './SystemPanel'
+import type { LockState } from '../lib/lock'
 import { Mark } from './Mark'
 
-type Tab = 'servers' | 'vpns' | 'system'
+type Tab = 'servers' | 'vpns' | 'system' | 'security' | 'audit'
 
 interface Props {
   servers: Server[]
   vpns: Vpn[]
+  lock: LockState
+  onLockChange: (s: LockState) => void
   onSaveServer: (s: Server, password: string) => Promise<string | null>
   onDeleteServer: (id: string) => Promise<string | null>
   onSaveVpn: (v: Vpn, password: string) => Promise<string | null>
@@ -83,6 +88,10 @@ function ServerForm({ initial, vpns, isNew, onSave, onCancel, onDelete }: { init
           </Field>
         </>
       )}
+      <label style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 12 }}>
+        <input type="checkbox" checked={!!d.production} onChange={(e) => set('production', e.target.checked)} />
+        <span>Production server: ask before connecting and before a root container shell</span>
+      </label>
       <Field label="Reached through">
         <select
           value={d.vpnId ?? (d.vpnRequired ? '__req' : '')}
@@ -178,7 +187,7 @@ function VpnForm({ initial, isNew, onSave, onCancel, onDelete }: { initial: Vpn;
 }
 
 /** Set everything up here: servers, VPN profiles and their credentials. */
-export function Admin({ servers, vpns, onSaveServer, onDeleteServer, onSaveVpn, onDeleteVpn }: Props) {
+export function Admin({ servers, vpns, lock, onLockChange, onSaveServer, onDeleteServer, onSaveVpn, onDeleteVpn }: Props) {
   const [tab, setTab] = useState<Tab>('servers')
   const [editing, setEditing] = useState<string | null>(null) // id, 'new', or null
 
@@ -193,11 +202,15 @@ export function Admin({ servers, vpns, onSaveServer, onDeleteServer, onSaveVpn, 
         <button className="btn" aria-pressed={tab === 'servers'} onClick={() => switchTab('servers')}>Servers · {servers.length}</button>
         <button className="btn" aria-pressed={tab === 'vpns'} onClick={() => switchTab('vpns')}>VPN profiles · {vpns.length}</button>
         <button className="btn" aria-pressed={tab === 'system'} onClick={() => switchTab('system')}>System</button>
-        {tab !== 'system' && <button className="btn" style={{ marginLeft: 'auto' }} onClick={() => setEditing('new')}>Add {tab === 'servers' ? 'server' : 'VPN profile'}</button>}
+        <button className="btn" aria-pressed={tab === 'security'} onClick={() => switchTab('security')}>Security</button>
+        <button className="btn" aria-pressed={tab === 'audit'} onClick={() => switchTab('audit')}>Audit</button>
+        {(tab === 'servers' || tab === 'vpns') && <button className="btn" style={{ marginLeft: 'auto' }} onClick={() => setEditing('new')}>Add {tab === 'servers' ? 'server' : 'VPN profile'}</button>}
       </div>
 
       {tab === 'system' && <SystemPanel />}
-      <div className="admin-body" hidden={tab === 'system'}>
+      {tab === 'security' && <SecurityPanel lock={lock} onChange={onLockChange} />}
+      {tab === 'audit' && <AuditPanel />}
+      <div className="admin-body" hidden={tab !== 'servers' && tab !== 'vpns'}>
         <div className="admin-list">
           {tab === 'servers' ? (
             <table>

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
@@ -103,7 +104,7 @@ func TestFortiUpWaitsForTheTunnel(t *testing.T) {
 	if m.Status("pine") != Up {
 		t.Fatalf("status %v, want up", m.Status("pine"))
 	}
-	if f.argv[0] != "pkexec" || !slices.Contains(f.argv, "openfortivpn") || !slices.Contains(f.argv, "-c") {
+	if f.argv[0] != "/usr/bin/pkexec" || !slices.Contains(f.argv, "/usr/bin/openfortivpn") || !slices.Contains(f.argv, "-c") {
 		t.Fatalf("argv %v", f.argv)
 	}
 	for _, want := range []string{"host = 203.0.113.50", "port = 10443", "username = info"} {
@@ -114,7 +115,7 @@ func TestFortiUpWaitsForTheTunnel(t *testing.T) {
 }
 
 func TestPasswordNeverInArgv(t *testing.T) {
-	withClients(t, "openconnect")
+	withClients(t, "openconnect", "openfortivpn")
 	for _, v := range []store.VPN{forti, gp} {
 		f := &fakeStarter{script: printThenStay("Tunnel is up and running.", "Connected as 10.0.0.2")}
 		if err := New(f).Up(ctx(t), v, "hunter2"); err != nil {
@@ -142,12 +143,18 @@ func TestFortiPasswordGoesInAPrivateFileThatIsRemoved(t *testing.T) {
 	}
 }
 
-// withClients pretends only the named programs are installed.
+// Unless a test says otherwise, every client is "installed" in a root-owned place.
+func init() {
+	lookPath = func(n string) (string, error) { return "/usr/bin/" + n, nil }
+	rootOwned = func(string) error { return nil }
+}
+
+// withClients pretends only the named programs (and pkexec) are installed.
 func withClients(t *testing.T, have ...string) {
 	t.Helper()
 	old := lookPath
 	lookPath = func(n string) (string, error) {
-		if slices.Contains(have, n) {
+		if n == "pkexec" || slices.Contains(have, n) {
 			return "/usr/bin/" + n, nil
 		}
 		return "", errors.New("not found")
@@ -209,7 +216,7 @@ func TestGlobalProtectUsesOpenconnect(t *testing.T) {
 	if err := New(f).Up(ctx(t), gp, "pw"); err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"openconnect", "--protocol=gp", "connect.example.gov", "support"} {
+	for _, want := range []string{"/usr/bin/openconnect", "--protocol=gp", "connect.example.gov", "support"} {
 		if !slices.Contains(f.argv, want) && !strings.Contains(strings.Join(f.argv, " "), want) {
 			t.Errorf("argv %v is missing %q", f.argv, want)
 		}
@@ -321,7 +328,7 @@ func TestGlobalProtectPrefersGpclientAndIsUpWhenItExitsCleanly(t *testing.T) {
 	if m.Status("gov") != Up {
 		t.Fatalf("status %v", m.Status("gov"))
 	}
-	want := []string{"pkexec", "gpclient", "--fix-openssl", "connect", "connect.example.gov", "-u", "support", "--auto-gateway", "--passwd-on-stdin", "--background"}
+	want := []string{"/usr/bin/pkexec", "/usr/bin/gpclient", "--fix-openssl", "connect", "connect.example.gov", "-u", "support", "--auto-gateway", "--passwd-on-stdin", "--background"}
 	if !slices.Equal(f.argv, want) {
 		t.Fatalf("argv %v\nwant %v", f.argv, want)
 	}
@@ -366,7 +373,7 @@ func TestGpclientDownRunsDisconnect(t *testing.T) {
 	if err := m.Down("gov"); err != nil {
 		t.Fatal(err)
 	}
-	if want := []string{"pkexec", "gpclient", "disconnect"}; !slices.Equal(f.argv, want) {
+	if want := []string{"/usr/bin/pkexec", "/usr/bin/gpclient", "disconnect"}; !slices.Equal(f.argv, want) {
 		t.Fatalf("down argv %v, want %v", f.argv, want)
 	}
 	if m.Status("gov") != Down {
@@ -402,5 +409,85 @@ func TestNothingStartsWhenAFieldCouldInjectIntoTheConfig(t *testing.T) {
 	f := &fakeStarter{script: printThenStay("Tunnel is up")}
 	if err := New(f).Up(ctx(t), forti, "pass\nword"); err == nil || f.n != 0 {
 		t.Errorf("password newline: err=%v starts=%d", err, f.n)
+	}
+}
+
+func TestAClientAUserCouldReplaceIsNeverRunAsRoot(t *testing.T) {
+	t.Setenv("XDG_RUNTIME_DIR", t.TempDir())
+	old := rootOwned
+	rootOwned = func(p string) error {
+		if strings.HasSuffix(p, "openfortivpn") {
+			return errors.New("the directory /home/me/bin is writable by its owner")
+		}
+		return nil
+	}
+	t.Cleanup(func() { rootOwned = old })
+	f := &fakeStarter{script: printThenStay("Tunnel is up")}
+	err := New(f).Up(ctx(t), forti, "pw")
+	if err == nil || !strings.Contains(err.Error(), "refusing to run") || f.n != 0 {
+		t.Fatalf("err=%v starts=%d", err, f.n)
+	}
+	if _, serr := os.ReadDir(runtimeDir()); serr == nil {
+		ents, _ := os.ReadDir(runtimeDir())
+		for _, e := range ents {
+			if strings.HasPrefix(e.Name(), "sshdeck-vpn-") {
+				t.Errorf("a config file with the password was left behind: %s", e.Name())
+			}
+		}
+	}
+}
+
+func TestRootOwnedCheckOnRealFiles(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("running as root: everything here is root-owned")
+	}
+	f, err := os.CreateTemp(t.TempDir(), "tool")
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.Close()
+	if err := checkRootOwned(f.Name()); err == nil {
+		t.Error("a file owned by an ordinary user was accepted for root")
+	}
+	if _, err := os.Stat("/usr/bin/env"); err == nil {
+		if err := checkRootOwned("/usr/bin/env"); err != nil {
+			t.Errorf("/usr/bin/env should be fine: %v", err)
+		}
+	}
+}
+
+func TestPasswordNeverAppearsInAnErrorFromTheClient(t *testing.T) {
+	withClients(t, "openconnect")
+	f := &fakeStarter{script: printThenExit(errors.New("exit status 1"), "ERROR: Failed to complete authentication")}
+	err := New(f).Up(ctx(t), gp, "hunter2-secret")
+	if err == nil || strings.Contains(err.Error(), "hunter2-secret") {
+		t.Fatalf("%v", err)
+	}
+}
+
+func TestSweepRemovesOnlyStaleConfigFiles(t *testing.T) {
+	dir := t.TempDir()
+	mk := func(name string, age time.Duration) string {
+		p := filepath.Join(dir, name)
+		if err := os.WriteFile(p, []byte("password = x\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		old := time.Now().Add(-age)
+		os.Chtimes(p, old, old)
+		return p
+	}
+	stale := mk("sshdeck-vpn-111.conf", time.Hour)
+	fresh := mk("sshdeck-vpn-222.conf", time.Second) // may belong to a connect in progress
+	other := mk("something-else.conf", time.Hour)
+	if n := SweepStale(dir, time.Minute); n != 1 {
+		t.Fatalf("removed %d files", n)
+	}
+	if _, err := os.Stat(stale); err == nil {
+		t.Error("stale config survived")
+	}
+	for _, keep := range []string{fresh, other} {
+		if _, err := os.Stat(keep); err != nil {
+			t.Errorf("%s must be left alone", keep)
+		}
 	}
 }

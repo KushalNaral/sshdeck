@@ -3,13 +3,18 @@ package main
 import (
 	"context"
 	"fmt"
+	"log"
 	"os"
 	"os/exec"
+	"os/user"
 	"path/filepath"
 	"sync"
+	"time"
 
+	"github.com/wailsapp/wails/v2/pkg/options"
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 
+	"github.com/KushalNaral/sshdeck/internal/audit"
 	"github.com/KushalNaral/sshdeck/internal/sshx"
 	"github.com/KushalNaral/sshdeck/internal/store"
 	"github.com/KushalNaral/sshdeck/internal/vpn"
@@ -26,10 +31,19 @@ type App struct {
 	open     func(ctx context.Context, srv store.Server, secret string) (sshx.Session, error)
 	lookPath func(file string) (string, error)
 
-	mu      sync.Mutex
-	conns   map[string]*conn         // live connections by server id
-	cancels map[string]func()        // connects still in flight
-	manual  map[string]chan struct{} // waiting on "I connected the VPN" by server id
+	// audit records an event (what happened, to what, a short detail). It never gets a secret.
+	audit func(event, subject, detail string)
+	alog  *audit.Log
+
+	vaultPath, settingsPath string
+	clock                   func() time.Time // a seam for the idle timer
+
+	mu         sync.Mutex
+	settings   Settings
+	lastActive time.Time
+	conns      map[string]*conn         // live connections by server id
+	cancels    map[string]func()        // connects still in flight
+	manual     map[string]chan struct{} // waiting on "I connected the VPN" by server id
 }
 
 func NewApp() (*App, error) {
@@ -37,11 +51,37 @@ func NewApp() (*App, error) {
 	if err != nil {
 		return nil, err
 	}
-	st, err := store.Open(filepath.Join(dir, "sshdeck", "data.json"), store.Keyring{})
+	base := filepath.Join(dir, "sshdeck")
+	if err := checkConfigDir(base); err != nil {
+		return nil, err
+	}
+	var st *store.Store
+	if _, serr := os.Stat(filepath.Join(base, "vault.enc")); serr == nil {
+		st, err = store.OpenLocked(filepath.Join(base, "vault.enc")) // the passphrase lock is on: start locked
+	} else {
+		st, err = store.Open(filepath.Join(base, "data.json"), store.Keyring{})
+	}
 	if err != nil {
 		return nil, err
 	}
+	vpn.SweepStale(vpn.StaleDir(), time.Minute) // a killed connect can leave a config file holding a VPN password
 	a := newApp(st, vpn.New(vpn.ExecStarter{}), sshx.Open)
+	a.vaultPath, a.settingsPath = filepath.Join(base, "vault.enc"), filepath.Join(base, "settings.json")
+	a.settings = loadSettings(a.settingsPath)
+	actor := "unknown"
+	if u, err := user.Current(); err == nil {
+		actor = u.Username
+	}
+	if l, err := audit.Open(filepath.Join(base, "audit.log"), actor); err != nil {
+		log.Printf("audit log unavailable: %v", err)
+	} else {
+		a.alog = l
+		a.audit = func(event, subject, detail string) {
+			if err := l.Add(event, subject, detail); err != nil {
+				log.Printf("audit: %v", err)
+			}
+		}
+	}
 	a.emit = func(name string, data ...any) { runtime.EventsEmit(a.ctx, name, data...) }
 	return a, nil
 }
@@ -49,15 +89,31 @@ func NewApp() (*App, error) {
 func newApp(st *store.Store, m vpn.Manager, open func(context.Context, store.Server, string) (sshx.Session, error)) *App {
 	return &App{
 		ctx: context.Background(), st: st, vpn: m, open: open, lookPath: exec.LookPath,
-		emit:  func(string, ...any) {},
+		emit: func(string, ...any) {}, audit: func(string, string, string) {},
+		clock: time.Now, settings: defaultSettings(), lastActive: time.Now(),
 		conns: map[string]*conn{}, cancels: map[string]func(){}, manual: map[string]chan struct{}{},
 	}
 }
 
-func (a *App) startup(ctx context.Context) { a.ctx = ctx }
+// secondLaunch runs in the first copy when the user starts sshdeck again: show the window instead.
+func (a *App) secondLaunch(options.SecondInstanceData) {
+	runtime.WindowUnminimise(a.ctx)
+	runtime.WindowShow(a.ctx)
+}
+
+func (a *App) startup(ctx context.Context) {
+	a.ctx = ctx
+	a.audit("app.start", "", "")
+	go a.idleLoop(ctx)
+}
 
 // shutdown closes every shell and stops every VPN this app started.
 func (a *App) shutdown(context.Context) {
+	a.audit("app.stop", "", "")
+	a.disconnectAll()
+}
+
+func (a *App) disconnectAll() {
 	a.mu.Lock()
 	ids := make([]string, 0, len(a.conns))
 	for id := range a.conns {
@@ -73,21 +129,76 @@ func (a *App) ListServers() []store.Server { return a.st.Servers() }
 func (a *App) ListVPNs() []store.VPN       { return a.st.VPNs() }
 
 func (a *App) SaveServer(s store.Server, password string) (store.Server, error) {
-	return a.st.SaveServer(s, password)
+	saved, err := a.st.SaveServer(s, password)
+	if err == nil {
+		a.audit("server.save", saved.Name, "")
+	}
+	return saved, err
 }
 func (a *App) DeleteServer(id string) error {
+	name := a.serverName(id)
 	a.Disconnect(id)
-	return a.st.DeleteServer(id)
+	err := a.st.DeleteServer(id)
+	if err == nil {
+		a.audit("server.delete", name, "")
+	}
+	return err
+}
+
+// serverName is the name to put in the audit trail; it falls back to the id when the server is gone or the app is locked.
+func (a *App) serverName(id string) string {
+	if sv, ok := a.server(id); ok {
+		return sv.Name
+	}
+	return id
+}
+
+func (a *App) vpnName(id string) string {
+	for _, v := range a.st.VPNs() {
+		if v.ID == id {
+			return v.Name
+		}
+	}
+	return id
 }
 
 func (a *App) SaveVPN(v store.VPN, password string) (store.VPN, error) {
-	return a.st.SaveVPN(v, password)
+	saved, err := a.st.SaveVPN(v, password)
+	if err == nil {
+		a.audit("vpn.save", saved.Name, "")
+	}
+	return saved, err
 }
-func (a *App) DeleteVPN(id string) error { return a.st.DeleteVPN(id) }
+func (a *App) DeleteVPN(id string) error {
+	name := a.vpnName(id)
+	err := a.st.DeleteVPN(id)
+	if err == nil {
+		a.audit("vpn.delete", name, "")
+	}
+	return err
+}
 
-func (a *App) ListTasks() []store.Task                   { return a.st.Tasks() }
-func (a *App) SaveTask(t store.Task) (store.Task, error) { return a.st.SaveTask(t) }
-func (a *App) DeleteTask(id string) error                { return a.st.DeleteTask(id) }
+func (a *App) ListTasks() []store.Task { return a.st.Tasks() }
+func (a *App) SaveTask(t store.Task) (store.Task, error) {
+	saved, err := a.st.SaveTask(t)
+	if err == nil {
+		a.audit("task.save", saved.Title, "")
+	}
+	return saved, err
+}
+func (a *App) DeleteTask(id string) error {
+	title := id
+	for _, t := range a.st.Tasks() {
+		if t.ID == id {
+			title = t.Title
+		}
+	}
+	err := a.st.DeleteTask(id)
+	if err == nil {
+		a.audit("task.delete", title, "")
+	}
+	return err
+}
 
 // beforeClose asks before closing a window that still has connections, since closing ends their shells and VPNs.
 func (a *App) beforeClose(ctx context.Context) (prevent bool) {

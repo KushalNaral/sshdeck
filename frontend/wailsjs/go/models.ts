@@ -1,3 +1,46 @@
+export namespace audit {
+	
+	export class Check {
+	    ok: boolean;
+	    entries: number;
+	    badLine: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new Check(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.ok = source["ok"];
+	        this.entries = source["entries"];
+	        this.badLine = source["badLine"];
+	    }
+	}
+	export class Entry {
+	    ts: string;
+	    actor: string;
+	    event: string;
+	    subject?: string;
+	    detail?: string;
+	    prev: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new Entry(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.ts = source["ts"];
+	        this.actor = source["actor"];
+	        this.event = source["event"];
+	        this.subject = source["subject"];
+	        this.detail = source["detail"];
+	        this.prev = source["prev"];
+	    }
+	}
+
+}
+
 export namespace main {
 	
 	export class ConnectResult {
@@ -32,6 +75,24 @@ export namespace main {
 	        this.purpose = source["purpose"];
 	        this.installed = source["installed"];
 	        this.installable = source["installable"];
+	    }
+	}
+	export class LockInfo {
+	    enabled: boolean;
+	    locked: boolean;
+	    idleMinutes: number;
+	    endOnLock: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new LockInfo(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.enabled = source["enabled"];
+	        this.locked = source["locked"];
+	        this.idleMinutes = source["idleMinutes"];
+	        this.endOnLock = source["endOnLock"];
 	    }
 	}
 
@@ -138,6 +199,7 @@ export namespace store {
 	    keyPath?: string;
 	    vpnId: string;
 	    vpnRequired?: boolean;
+	    production?: boolean;
 	    os?: string;
 	    php?: string;
 	    phpTarget?: string;
@@ -161,6 +223,7 @@ export namespace store {
 	        this.keyPath = source["keyPath"];
 	        this.vpnId = source["vpnId"];
 	        this.vpnRequired = source["vpnRequired"];
+	        this.production = source["production"];
 	        this.os = source["os"];
 	        this.php = source["php"];
 	        this.phpTarget = source["phpTarget"];

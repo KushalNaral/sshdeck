@@ -9,9 +9,12 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"sync"
+	"syscall"
+	"time"
 
 	"github.com/KushalNaral/sshdeck/internal/store"
 )
@@ -99,8 +102,72 @@ func runtimeDir() string {
 	return os.TempDir()
 }
 
-// lookPath is swapped in tests.
-var lookPath = exec.LookPath
+// lookPath and rootOwned are swapped in tests.
+var (
+	lookPath  = exec.LookPath
+	rootOwned = checkRootOwned
+)
+
+// checkRootOwned refuses a program that an ordinary user could replace. The VPN clients run as root after one
+// password prompt, so a binary in a user-writable place (or in a user-writable directory) must not be run.
+func checkRootOwned(path string) error {
+	real, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		return err
+	}
+	for p := real; ; p = filepath.Dir(p) {
+		st, err := os.Stat(p)
+		if err != nil {
+			return err
+		}
+		if sys, ok := st.Sys().(*syscall.Stat_t); ok && sys.Uid != 0 {
+			return fmt.Errorf("%s is not owned by root", p)
+		}
+		if st.Mode().Perm()&0o022 != 0 {
+			return fmt.Errorf("%s can be changed by someone other than root", p)
+		}
+		if p == "/" {
+			return nil
+		}
+	}
+}
+
+// SweepStale deletes config files left by an earlier run that was killed mid-connect (they hold a VPN password).
+// Files younger than olderThan are kept, since a connect may be using them. It returns how many it removed.
+func SweepStale(dir string, olderThan time.Duration) int {
+	ents, err := os.ReadDir(dir)
+	if err != nil {
+		return 0
+	}
+	n := 0
+	for _, e := range ents {
+		if e.IsDir() || !strings.HasPrefix(e.Name(), "sshdeck-vpn-") || !strings.HasSuffix(e.Name(), ".conf") {
+			continue
+		}
+		if info, err := e.Info(); err == nil && time.Since(info.ModTime()) >= olderThan && os.Remove(filepath.Join(dir, e.Name())) == nil {
+			n++
+		}
+	}
+	return n
+}
+
+// StaleDir is where the config files live; app startup sweeps it.
+func StaleDir() string { return runtimeDir() }
+
+// resolve returns the absolute path of a program that will run as root.
+func resolve(name string) (string, error) {
+	p, err := lookPath(name)
+	if err != nil {
+		return "", fmt.Errorf("%s is not installed", name)
+	}
+	if !filepath.IsAbs(p) {
+		return "", fmt.Errorf("refusing to run %s as root: it was found by a relative path (%s)", name, p)
+	}
+	if err := rootOwned(p); err != nil {
+		return "", fmt.Errorf("refusing to run %s as root: %w", p, err)
+	}
+	return p, nil
+}
 
 // Tool is the program that connects a VPN of this kind. GlobalProtect prefers gpclient (portal and gateway
 // sign-in, which plain openconnect fails on some gateways) and falls back to openconnect.
@@ -126,6 +193,19 @@ func command(v store.VPN, secret string) (argv []string, stdin, ready string, st
 		return nil, "", "", nil, cleanup, err
 	}
 	gw := fmt.Sprintf("%s:%d", v.Gateway, v.Port)
+	if v.Kind == store.Hillstone {
+		return nil, "", "", nil, cleanup, ErrManual
+	}
+	pk, err := resolve("pkexec")
+	if err != nil {
+		return nil, "", "", nil, cleanup, err
+	}
+	var tool string
+	if v.Kind == store.Forti || v.Kind == store.GP {
+		if tool, err = resolve(Tool(v.Kind)); err != nil {
+			return nil, "", "", nil, cleanup, err
+		}
+	}
 	switch v.Kind {
 	case store.Forti:
 		f, err := os.CreateTemp(runtimeDir(), "sshdeck-vpn-*.conf")
@@ -150,7 +230,7 @@ func command(v store.VPN, secret string) (argv []string, stdin, ready string, st
 			cleanup()
 			return nil, "", "", nil, nil, werr
 		}
-		return []string{"pkexec", "openfortivpn", "-c", f.Name()}, "", "Tunnel is up", nil, cleanup, nil
+		return []string{pk, tool, "-c", f.Name()}, "", "Tunnel is up", nil, cleanup, nil
 	case store.GP:
 		if Tool(store.GP) == "gpclient" {
 			// --background: gpclient signs in, then exits 0 and leaves the tunnel running, so no ready line is needed.
@@ -158,10 +238,10 @@ func command(v store.VPN, secret string) (argv []string, stdin, ready string, st
 			if v.Port != 443 {
 				server = gw
 			}
-			argv := []string{"pkexec", "gpclient", "--fix-openssl", "connect", server, "-u", v.User, "--auto-gateway", "--passwd-on-stdin", "--background"}
-			return argv, secret + "\n", "", []string{"pkexec", "gpclient", "disconnect"}, cleanup, nil
+			argv := []string{pk, tool, "--fix-openssl", "connect", server, "-u", v.User, "--auto-gateway", "--passwd-on-stdin", "--background"}
+			return argv, secret + "\n", "", []string{pk, tool, "disconnect"}, cleanup, nil
 		}
-		return []string{"pkexec", "openconnect", "--protocol=gp", "--user", v.User, "--passwd-on-stdin", gw}, secret + "\n", "Connected as", nil, cleanup, nil
+		return []string{pk, tool, "--protocol=gp", "--user", v.User, "--passwd-on-stdin", gw}, secret + "\n", "Connected as", nil, cleanup, nil
 	case store.Hillstone:
 		return nil, "", "", nil, cleanup, ErrManual
 	}
@@ -216,7 +296,7 @@ func (m *manager) Up(ctx context.Context, v store.VPN, secret string) error {
 	p, err := m.s.Start(ctx, argv, stdin)
 	if err != nil {
 		m.setState(v.ID, e, Failed)
-		return fmt.Errorf("start %s: %w", argv[1], err)
+		return fmt.Errorf("start %s: %w", filepath.Base(argv[1]), err)
 	}
 	m.mu.Lock()
 	e.p = p
@@ -233,9 +313,9 @@ func (m *manager) Up(ctx context.Context, v store.VPN, secret string) error {
 				}
 				m.setState(v.ID, e, Failed)
 				if len(tail) == 0 {
-					return fmt.Errorf("%s exited before the tunnel came up, without saying why", argv[1])
+					return fmt.Errorf("%s exited before the tunnel came up, without saying why", filepath.Base(argv[1]))
 				}
-				return fmt.Errorf("%s could not connect: %w", argv[1], explain(tail))
+				return fmt.Errorf("%s could not connect: %w", filepath.Base(argv[1]), explain(tail))
 			}
 			if line = strings.TrimSpace(line); line != "" {
 				if tail = append(tail, line); len(tail) > 12 {
@@ -262,7 +342,7 @@ func (m *manager) Up(ctx context.Context, v store.VPN, secret string) error {
 			if len(tail) > 0 {
 				last = tail[len(tail)-1]
 			}
-			return fmt.Errorf("%s did not come up: %w (last output: %s)", argv[1], ctx.Err(), last)
+			return fmt.Errorf("%s did not come up: %w (last output: %s)", filepath.Base(argv[1]), ctx.Err(), last)
 		}
 	}
 }

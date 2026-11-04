@@ -10,6 +10,10 @@ export function AttachShell(arg1, arg2, arg3, arg4) {
   return window['go']['main']['App']['AttachShell'](arg1, arg2, arg3, arg4);
 }
 
+export function ChangePassphrase(arg1, arg2) {
+  return window['go']['main']['App']['ChangePassphrase'](arg1, arg2);
+}
+
 export function CheckDependencies() {
   return window['go']['main']['App']['CheckDependencies']();
 }
@@ -42,8 +46,16 @@ export function Disconnect(arg1) {
   return window['go']['main']['App']['Disconnect'](arg1);
 }
 
+export function EnableLock(arg1) {
+  return window['go']['main']['App']['EnableLock'](arg1);
+}
+
 export function InstallDependencies(arg1) {
   return window['go']['main']['App']['InstallDependencies'](arg1);
+}
+
+export function ListAudit(arg1) {
+  return window['go']['main']['App']['ListAudit'](arg1);
 }
 
 export function ListServers() {
@@ -58,8 +70,20 @@ export function ListVPNs() {
   return window['go']['main']['App']['ListVPNs']();
 }
 
+export function Lock() {
+  return window['go']['main']['App']['Lock']();
+}
+
+export function LockState() {
+  return window['go']['main']['App']['LockState']();
+}
+
 export function OpenContainerShell(arg1, arg2, arg3, arg4, arg5) {
   return window['go']['main']['App']['OpenContainerShell'](arg1, arg2, arg3, arg4, arg5);
+}
+
+export function RecordConfirm(arg1, arg2) {
+  return window['go']['main']['App']['RecordConfirm'](arg1, arg2);
 }
 
 export function SaveServer(arg1, arg2) {
@@ -74,10 +98,26 @@ export function SaveVPN(arg1, arg2) {
   return window['go']['main']['App']['SaveVPN'](arg1, arg2);
 }
 
+export function SetLockSettings(arg1, arg2) {
+  return window['go']['main']['App']['SetLockSettings'](arg1, arg2);
+}
+
 export function TermResize(arg1, arg2, arg3, arg4) {
   return window['go']['main']['App']['TermResize'](arg1, arg2, arg3, arg4);
 }
 
 export function TermWrite(arg1, arg2, arg3) {
   return window['go']['main']['App']['TermWrite'](arg1, arg2, arg3);
+}
+
+export function Touch() {
+  return window['go']['main']['App']['Touch']();
+}
+
+export function Unlock(arg1) {
+  return window['go']['main']['App']['Unlock'](arg1);
+}
+
+export function VerifyAudit() {
+  return window['go']['main']['App']['VerifyAudit']();
 }

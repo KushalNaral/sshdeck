@@ -200,24 +200,63 @@ Run everything with `go test -race -tags webkit2_41 ./...`.
 
 Not covered by tests: a real VPN, a real SSH server on another network, and the polkit prompt.
 
-## 10. Security notes
+## 10. Security
 
-- Passwords: OS keyring only. Not in `data.json`, not in logs, not in command lines.
-- The one place a password is briefly on disk is the `openfortivpn` config file: mode 0600 on the per-user tmpfs,
-  removed as soon as the attempt ends.
-- Installing programs and starting VPNs go through `pkexec`, so the system prompts for the admin password; sshdeck
-  never sees it. Only names from a fixed list can be installed.
-- Host keys are pinned after first use. VPN gateway certificates are pinned by digest, only when you add one.
-- A seed/import of the master `.ods` puts plaintext passwords through memory once and into the keyring; delete the
-  spreadsheet afterwards.
+**Data at rest.** Two modes.
+- *Default:* metadata in `data.json` (0600), passwords in the OS keyring.
+- *Passphrase lock (Admin, Security):* everything moves into `vault.enc`: the server list, VPN profiles, tasks and the
+  passwords. Argon2id turns the passphrase into a key, XChaCha20-Poly1305 encrypts and authenticates the file, and the
+  header (format, cost settings, salt) is authenticated too. Turning it on migrates the keyring entries into the vault,
+  reopens the new file to check it, and only then deletes `data.json` and the keyring entries. There is no recovery
+  from a forgotten passphrase. After three wrong passphrases in a row, further attempts wait (0.5 s doubling, capped).
+
+**Locking.** While locked the store holds nothing in memory and every bound method refuses (`ErrLocked`), including
+typing into a shell. The idle timer lives in Go, not in the page. Open sessions keep running while locked unless
+"end sessions when locking" is on; the page stays mounted but inert behind the lock screen, because unmounting a
+terminal ends its shell.
+
+**Audit.** `audit.log` records connects, VPN up/down, shell and container exec, config and lock events. Never
+passwords, keystrokes or command output. Each line carries the hash of the line before it; Admin, Audit shows
+whether the chain is intact. Limits: editing only the very last line cannot be detected, and the log is plaintext,
+so it shows server names even when the vault is locked.
+
+**Production servers.** A server flagged production gets a marker, and the UI asks before connecting and before a
+root container shell. The confirmation is recorded (`production.confirm`). This is a guard against mistakes, not an
+access control: the page could be driven without it.
+
+**The window.** Production builds carry a Content-Security-Policy (nothing loads from outside the app, no inline
+script), no browser context menu, no devtools, and a single-instance lock. `SSHDECK_NO_CSP=1` omits the CSP when
+building, in case a packaged window comes up blank.
+
+**Root.** VPN clients run through `pkexec`, so the system asks for the admin password and sshdeck never sees it.
+Each client is resolved to an absolute path and refused unless the file and every directory above it are owned by
+root and not writable by others. Host, gateway, user and VPN password values that could inject options or config
+lines (leading `-`, line breaks, control characters) are refused when saved and again before a client starts. Config
+files that hold a password live on the per-user tmpfs, 0600, and a startup sweep removes any a killed run left behind.
+
+**Files.** At startup the config directory is made 0700 and sshdeck's files 0600; a symlink in place of one of them,
+or a file owned by another user, stops the app with a clear message.
+
+**Network.** Host keys are trusted on first use, then pinned. VPN gateway certificates are pinned by digest only when
+you add one.
+
+**Releases.** `packaging/package.sh` runs the dependency audit (`govulncheck`, `npm audit`), builds without devtools,
+and writes `SHA256SUMS` (and a GPG signature with `SIGN_KEY`). `install.sh` verifies the checksums first.
+
+**Not covered.** Anything running as you can read the process's memory while it is unlocked. The vault protects the
+data on disk and from a locked screen, not from malware in your session. A password released to the app lives in
+memory while in use.
 
 ## 11. Known gaps
 
-- Key-based SSH login.
 - A terminal tab opens a new SSH login, so servers that cap sessions per user may refuse extra tabs.
 - Analysis opens one login per command; a shared connection would be faster.
 - VPN stop under `pkexec` and the `openfortivpn` config-file flow are unconfirmed on a real gateway beyond what is
   reported above.
 - The importer UI with a review screen is not built; the importer package reads the spreadsheet but seeding is done
   by a one-off command that is kept out of the repository because it names real clients.
-- Reconnect and keepalive, per-server extra credentials (database, Jenkins, cPanel, RDP), patch-journey history.
+- Per-server extra credentials (database, Jenkins, cPanel, RDP).
+- There is no way to turn the passphrase lock off again from the UI.
+- `govulncheck` reports one advisory in `golang.org/x/crypto` v0.58.0 that sshdeck does not call; the fix exists only
+  on an untagged commit, so upgrade when a release carries it.
+- Organisation mode (central inventory, OIDC, per-user access) is designed in [ORG-MODE.md](ORG-MODE.md), not built.

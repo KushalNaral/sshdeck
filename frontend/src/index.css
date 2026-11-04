@@ -894,3 +894,37 @@ td {
 .themebtn {
   color: inherit;
 }
+
+.lockscreen {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: grid;
+  place-content: center;
+  background: var(--bed);
+}
+
+.lockcard {
+  width: min(420px, calc(100vw - 32px));
+  padding: calc(var(--u) * 3);
+  background: var(--pane);
+  color: var(--ink);
+  border: 1px solid var(--line);
+  display: grid;
+  gap: var(--u);
+}
+
+.prod {
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  padding: 0 5px;
+  line-height: 18px;
+  border: 1px solid currentColor;
+  color: var(--bad-glass);
+  flex: none;
+}
+
+.admin-form .prod,
+.pane .prod {
+  color: var(--bad);
+}
