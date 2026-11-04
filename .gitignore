@@ -1,0 +1,11 @@
+node_modules/
+frontend/dist/*
+!frontend/dist/.gitkeep
+build/bin/
+*.ods
+.env
+.impeccable/live/
+.impeccable/review/
+.impeccable/serve*
+.impeccable/questions/
+frontend/package.json.md5
