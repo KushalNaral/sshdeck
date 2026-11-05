@@ -15,6 +15,12 @@ import (
 	"time"
 )
 
+// OpenConnect-GUI's installer has a "console" component that holds openconnect.exe, and it is switched off by default,
+// so a silent install leaves it out. The installer decides each component's initial state from a registry value it
+// wrote on an earlier install (HKLM, Software\Microsoft\Windows\CurrentVersion\Uninstall\OpenConnect-GUI\Components\
+// App_Console, value "Installed"); selectConsoleComponent sets it to 1 before the run (install_windows.go). The names
+// come from the installer's own header and the CPack NSIS template it was built from.
+//
 // The Windows VPN client, openconnect, comes in the OpenConnect-GUI installer. sshdeck can install it from the
 // elevated helper: it downloads exactly this file, checks the SHA-256 below, runs it silently, and checks that
 // openconnect.exe ended up where sshdeck looks. The job takes no parameters, so a process that learned the helper's
@@ -38,6 +44,9 @@ type installEnv struct {
 	run     func(ctx context.Context, path string, args ...string) error
 	found   func() bool // openconnect.exe is where sshdeck looks for it
 	log     func(string)
+	// prepare makes the installer include the console component (openconnect.exe), which it leaves out of a silent
+	// install; it returns a function that puts things back, called if the install does not succeed.
+	prepare func() (undo func(), err error)
 }
 
 func installOpenconnect(ctx context.Context, env installEnv) error {
@@ -82,13 +91,19 @@ func installOpenconnect(ctx context.Context, env installEnv) error {
 	if err := os.WriteFile(path, data, 0o700); err != nil {
 		return err
 	}
+	undo, err := env.prepare()
+	if err != nil {
+		return fmt.Errorf("could not ask the installer to include openconnect.exe: %w", err)
+	}
 	env.log("Running the installer (this can take a minute)…")
 	rctx, cancel := context.WithTimeout(ctx, 10*time.Minute)
 	defer cancel()
 	if err := env.run(rctx, path, "/S"); err != nil {
+		undo()
 		return fmt.Errorf("the installer did not finish: %w", err)
 	}
 	if !env.found() {
+		undo()
 		return errors.New("the installer finished, but openconnect.exe is not where sshdeck looks for it. Run the OpenConnect-GUI installer yourself and tick the openconnect.exe component, or install OpenConnect for all users another way")
 	}
 	env.log("OpenConnect is installed.")
@@ -109,8 +124,9 @@ func defaultInstall(ctx context.Context, log func(string)) error {
 		run: func(ctx context.Context, path string, args ...string) error {
 			return exec.CommandContext(ctx, path, args...).Run()
 		},
-		found: func() bool { _, err := defaultLookPath("openconnect"); return err == nil },
-		log:   log,
+		found:   func() bool { _, err := defaultLookPath("openconnect"); return err == nil },
+		log:     log,
+		prepare: selectConsoleComponent,
 	})
 }
 

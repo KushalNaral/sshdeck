@@ -17,6 +17,7 @@ import (
 type installRig struct {
 	env    installEnv
 	ran    []string
+	order  []string // prepare, run and undo, in the order they happened
 	logs   []string
 	target string
 }
@@ -30,10 +31,15 @@ func newInstallRig(t *testing.T, body []byte, hash string) *installRig {
 		client: srv.Client(), url: srv.URL + "/openconnect-gui.exe", sha: hash, tmpRoot: t.TempDir(),
 		run: func(_ context.Context, path string, args ...string) error {
 			r.ran = append(r.ran, path+" "+strings.Join(args, " "))
+			r.order = append(r.order, "run")
 			return os.WriteFile(r.target, []byte("exe"), 0o755) // what a real installer would leave behind
 		},
 		found: func() bool { _, err := os.Stat(r.target); return err == nil },
 		log:   func(s string) { r.logs = append(r.logs, s) },
+		prepare: func() (func(), error) {
+			r.order = append(r.order, "prepare")
+			return func() { r.order = append(r.order, "undo") }, nil
+		},
 	}
 	return r
 }
@@ -150,5 +156,52 @@ func TestInstallErrorsReachTheApp(t *testing.T) {
 	defer cancel()
 	if err := RunInstall(ctx2, hs, func(string) {}); err == nil || !strings.Contains(err.Error(), "hash mismatch") {
 		t.Errorf("err = %v", err)
+	}
+}
+
+func TestConsoleComponentIsSelectedBeforeTheInstallerRunsAndKeptOnSuccess(t *testing.T) {
+	body := []byte("installer bytes")
+	r := newInstallRig(t, body, sum(body))
+	if err := installOpenconnect(context.Background(), r.env); err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(r.order, ","); got != "prepare,run" {
+		t.Errorf("order = %s: select the console component first, and keep it once the install worked", got)
+	}
+}
+
+func TestConsoleComponentSettingIsUndoneWhenTheInstallFails(t *testing.T) {
+	body := []byte("x")
+	for name, fail := range map[string]func(*installRig){
+		"installer error": func(r *installRig) {
+			r.env.run = func(context.Context, string, ...string) error {
+				r.order = append(r.order, "run")
+				return errors.New("exit status 2")
+			}
+		},
+		"no openconnect.exe afterwards": func(r *installRig) {
+			r.env.run = func(context.Context, string, ...string) error { r.order = append(r.order, "run"); return nil }
+		},
+	} {
+		r := newInstallRig(t, body, sum(body))
+		fail(r)
+		if err := installOpenconnect(context.Background(), r.env); err == nil {
+			t.Fatalf("%s: want an error", name)
+		}
+		if got := strings.Join(r.order, ","); got != "prepare,run,undo" {
+			t.Errorf("%s: order = %s, want the registry put back", name, got)
+		}
+	}
+}
+
+func TestInstallStopsIfTheRegistryCannotBePrepared(t *testing.T) {
+	body := []byte("x")
+	r := newInstallRig(t, body, sum(body))
+	r.env.prepare = func() (func(), error) { return nil, errors.New("access denied") }
+	if err := installOpenconnect(context.Background(), r.env); err == nil || !strings.Contains(err.Error(), "access denied") {
+		t.Errorf("err = %v", err)
+	}
+	if len(r.ran) != 0 {
+		t.Error("the installer ran although it could not be set up to include openconnect.exe")
 	}
 }

@@ -210,7 +210,10 @@ Admin, System offers an Install button for openconnect. It asks the elevated hel
 site, check it against a SHA-256 compiled into the app, run it silently (`/S`), and confirm that `openconnect.exe` is
 where sshdeck looks. The job has no parameters and the helper refuses it with arguments, so the token cannot be used to
 install anything else. The download is checked before it is written, then run from a folder under `%ProgramData%` that
-ordinary users cannot modify. To move to a newer installer, download and check it, then change the URL and hash.
+ordinary users cannot modify. The installer leaves `openconnect.exe` (its "console" component) out of a silent install,
+and decides each component's initial state from `HKLM\Software\Microsoft\Windows\CurrentVersion\Uninstall\OpenConnect-GUI\
+Components\<name>\Installed`; so the job sets that value to 1 for `App_Console` first and puts the registry back if the
+install fails (`install_windows.go`). The names were read from the installer's own header. To move to a newer installer, download and check it, then change the URL and hash.
 
 ### Updates
 
