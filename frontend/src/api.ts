@@ -23,10 +23,13 @@ export interface Backend {
 export class ConnectError extends Error {
   problem: string
   recovery: string
-  constructor(problem: string, recovery: string) {
+  /** What the VPN client was run as and printed, after a failed VPN step. */
+  details?: string
+  constructor(problem: string, recovery: string, details?: string) {
     super(problem)
     this.problem = problem
     this.recovery = recovery
+    this.details = details
   }
 }
 

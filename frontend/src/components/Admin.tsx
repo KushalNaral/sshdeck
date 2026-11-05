@@ -209,7 +209,14 @@ function VpnForm({ initial, isNew, onSave, onCancel, onDelete }: { initial: Vpn;
           </Field>
         </>
       )}
-      {d.kind === 'hillstone' && <p className="dim">Hillstone has no Linux command-line client. sshdeck will ask you to connect it yourself, then confirm.</p>}
+      {d.kind === 'hillstone' ? (
+        <p className="dim">Hillstone has no command-line client. sshdeck will ask you to connect it yourself, then confirm.</p>
+      ) : (
+        <label style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 12 }}>
+          <input type="checkbox" checked={!!d.manual} onChange={(e) => set('manual', e.target.checked)} />
+          <span>I connect this VPN myself, with its own app (sshdeck waits for me to confirm, and never starts it)</span>
+        </label>
+      )}
       <Note />
       {err && <p className="bad" role="alert">{err}</p>}
       <div className="actions">

@@ -2,6 +2,9 @@ package main
 
 import (
 	"errors"
+	"github.com/KushalNaral/sshdeck/internal/store"
+	"github.com/KushalNaral/sshdeck/internal/vpn"
+	"strings"
 	"testing"
 	"time"
 )
@@ -233,5 +236,41 @@ func TestShortenKeepsLongLinesReadable(t *testing.T) {
 	}
 	if got := shorten("abc", 4); got != "abc" {
 		t.Errorf("got %q", got)
+	}
+}
+
+func TestFailedVPNConnectGivesTheClientOutputAsDetails(t *testing.T) {
+	a, fv, _ := rig(t, okOpen(newShell()))
+	fv.err = &vpn.ClientError{Err: errors.New("Failed to complete authentication"), Command: "openconnect --protocol=gp gw", Output: []string{"POST https://gw/login", "Failed to complete authentication"}}
+	r := a.Connect("a")
+	if r.OK || !strings.Contains(r.Details, "$ openconnect --protocol=gp gw") || !strings.Contains(r.Details, "POST https://gw/login") {
+		t.Fatalf("result = %+v", r)
+	}
+	if !strings.Contains(r.Recovery, "user") || !strings.Contains(r.Recovery, "official") {
+		t.Errorf("recovery = %q, want a hint about credentials and the official client", r.Recovery)
+	}
+}
+
+func TestAVPNMarkedManualWaitsForYouLikeHillstone(t *testing.T) {
+	a, fv, ev := rig(t, okOpen(newShell()))
+	v, err := a.st.SaveVPN(store.VPN{Name: "Official GP", Kind: store.GP, Gateway: "gp.example.org", Port: 443, User: "u", Manual: true}, "pw")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.st.SaveServer(store.Server{ID: "m", Name: "M", Host: "h", Port: 22, User: "u", Auth: "password", VPNID: v.ID}, "pw"); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan ConnectResult, 1)
+	go func() { done <- a.Connect("m") }()
+	until(t, "waiting for the user", func() bool {
+		steps, _ := ev.get("connect:m").([]Step)
+		return len(steps) > 0 && steps[0].Status == "manual"
+	})
+	a.ConfirmManualVPN("m")
+	if r := <-done; !r.OK {
+		t.Fatalf("%+v", r)
+	}
+	if len(fv.up) != 0 {
+		t.Errorf("sshdeck started the client for a VPN you connect yourself: %v", fv.up)
 	}
 }

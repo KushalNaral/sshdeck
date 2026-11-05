@@ -818,3 +818,24 @@ func TestProgressNeverCarriesThePassword(t *testing.T) {
 		}
 	}
 }
+
+func TestFailureCarriesTheClientsOutputWithoutThePassword(t *testing.T) {
+	asWindows(t)
+	f := &fakeStarter{script: printThenExit(errors.New("exit status 1"),
+		"POST https://gw.example.org/ssl-vpn/login.esp user=support pass=hunter2",
+		"Failed to complete authentication")}
+	err := New(f).Up(ctx(t), gp, "hunter2")
+	var ce *ClientError
+	if !errors.As(err, &ce) {
+		t.Fatalf("err = %v, want a ClientError", err)
+	}
+	if !strings.Contains(err.Error(), "Failed to complete authentication") {
+		t.Errorf("message = %v", err)
+	}
+	if len(ce.Output) != 2 || strings.Contains(strings.Join(ce.Output, "\n"), "hunter2") {
+		t.Errorf("output = %v, want both lines with the password blanked", ce.Output)
+	}
+	if !strings.Contains(ce.Command, "--protocol=gp") || strings.Contains(ce.Command, "hunter2") {
+		t.Errorf("command = %q", ce.Command)
+	}
+}

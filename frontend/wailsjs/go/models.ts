@@ -47,6 +47,7 @@ export namespace main {
 	    ok: boolean;
 	    problem?: string;
 	    recovery?: string;
+	    details?: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new ConnectResult(source);
@@ -57,6 +58,7 @@ export namespace main {
 	        this.ok = source["ok"];
 	        this.problem = source["problem"];
 	        this.recovery = source["recovery"];
+	        this.details = source["details"];
 	    }
 	}
 	export class Dep {
@@ -427,6 +429,7 @@ export namespace store {
 	    note?: string;
 	    trustedCert?: string;
 	    trustedPin?: string;
+	    manual?: boolean;
 	
 	    static createFrom(source: any = {}) {
 	        return new VPN(source);
@@ -443,6 +446,7 @@ export namespace store {
 	        this.note = source["note"];
 	        this.trustedCert = source["trustedCert"];
 	        this.trustedPin = source["trustedPin"];
+	        this.manual = source["manual"];
 	    }
 	}
 

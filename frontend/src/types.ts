@@ -13,6 +13,8 @@ export interface Vpn {
   trustedCert?: string
   /** The same certificate as a pin-sha256 of its public key (openconnect). Filled in with trustedCert. */
   trustedPin?: string
+  /** You connect this VPN yourself with its own app; sshdeck waits for you to confirm. */
+  manual?: boolean
 }
 
 // One cell of the fixed-cell state mark: filled holds, hollow does not, struck is a problem, confirmed is live.
@@ -130,7 +132,7 @@ export interface Session {
   nextTab: number
   tabInfo?: Record<number, ContainerTab>
   since?: number
-  error?: { problem: string; recovery: string }
+  error?: { problem: string; recovery: string; details?: string }
   link?: Link
 }
 

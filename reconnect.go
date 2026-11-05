@@ -22,7 +22,7 @@ type Link struct {
 // watch waits for the connection's SSH link to end and, unless the user disconnected, brings it back.
 // It runs until Disconnect cancels ctx.
 func (a *App) watch(ctx context.Context, serverID string, c *conn, vp *store.VPN) {
-	if vp != nil && vpn.Automatic(vp.Kind) {
+	if vp != nil && autoVPN(vp) {
 		go a.watchTunnel(ctx, c, vp)
 	}
 	for {
@@ -120,7 +120,7 @@ func (a *App) reconnect(ctx context.Context, serverID string, c *conn, vp *store
 		if !ok {
 			return
 		}
-		if vp != nil && vpn.Automatic(vp.Kind) && a.vpn.Status(vp.ID) != vpn.Up { // Hillstone is connected by hand: nothing to restart
+		if vp != nil && autoVPN(vp) && a.vpn.Status(vp.ID) != vpn.Up { // Hillstone is connected by hand: nothing to restart
 			if res, bad := a.vpnUp(ctx, *vp, func(string, func(*Step)) {}); bad {
 				last = res
 				continue

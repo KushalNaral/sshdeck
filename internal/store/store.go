@@ -156,6 +156,9 @@ type VPN struct {
 	// TrustedPin is the same certificate as a pin-sha256 of its public key, the form openconnect takes. "Fetch from
 	// gateway" fills in both; openfortivpn uses TrustedCert and openconnect prefers TrustedPin.
 	TrustedPin string `json:"trustedPin,omitempty"`
+	// Manual means sshdeck does not start this VPN: you connect it with its own app and confirm, as for Hillstone.
+	// For a gateway the command-line clients cannot sign in to.
+	Manual bool `json:"manual,omitempty"`
 }
 
 // Task is a to-do about one or more servers, such as "upgrade PHP on Atlas". Status is todo, doing or done.

@@ -11,7 +11,7 @@ export const wailsBackend: Backend = {
     const off = EventsOn(`connect:${server.id}`, (steps: Step[]) => onSteps(steps))
     try {
       const r = await App.Connect(server.id)
-      if (!r.ok) throw new ConnectError(r.problem || 'The connection failed.', r.recovery || 'Try again.')
+      if (!r.ok) throw new ConnectError(r.problem || 'The connection failed.', r.recovery || 'Try again.', r.details)
     } finally {
       off()
     }

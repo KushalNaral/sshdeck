@@ -127,7 +127,7 @@ export default function App() {
       } catch (e) {
         if (!current()) return
         const err = e instanceof ConnectError ? e : new ConnectError('The connection failed.', 'Try again; if it keeps failing, check the credentials.')
-        patch(id, (s) => ({ ...s, state: 'failed', error: { problem: err.problem, recovery: err.recovery } }))
+        patch(id, (s) => ({ ...s, state: 'failed', error: { problem: err.problem, recovery: err.recovery, details: err.details } }))
       }
     },
     [patch],

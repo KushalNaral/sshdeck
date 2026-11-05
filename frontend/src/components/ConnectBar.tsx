@@ -1,4 +1,6 @@
+import { useState } from 'react'
 import type { Mark as MarkKind, Server, Session, Step, Vpn } from '../types'
+import { ClipboardSetText } from '../../wailsjs/runtime/runtime'
 import { Mark } from './Mark'
 
 const stepMark = (s: Step): MarkKind => (s.status === 'done' ? 'confirmed' : s.status === 'fail' ? 'struck' : 'hollow')
@@ -11,6 +13,28 @@ interface Props {
   onConnect: () => void
   onDisconnect: () => void
   onManualDone: () => void
+}
+
+/** What the VPN client printed when it failed, to read or copy into a bug report. It never holds the password. */
+function FailureDetails({ text }: { text: string }) {
+  const [copied, setCopied] = useState(false)
+  const copy = async () => {
+    try {
+      if ('go' in window) await ClipboardSetText(text)
+      else await navigator.clipboard.writeText(text)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2000)
+    } catch {
+      /* the text can still be selected by hand */
+    }
+  }
+  return (
+    <details style={{ marginTop: 4 }}>
+      <summary>Show what the VPN client said</summary>
+      <pre className="deplog" aria-label="VPN client output">{text}</pre>
+      <button className="btn" type="button" onClick={copy}>{copied ? 'Copied' : 'Copy'}</button>
+    </details>
+  )
 }
 
 /** The path to the shell, one cell per step, each as wide as it actually took. */
@@ -58,6 +82,7 @@ export function ConnectBar({ server, vpn, session, onConnect, onDisconnect, onMa
           <>
             <span className="bad">
               <strong>{session.error?.problem}</strong> {session.error?.recovery}
+              {session.error?.details && <FailureDetails text={session.error.details} />}
             </span>
             <button className="btn primary" onClick={onConnect}>
               Try again

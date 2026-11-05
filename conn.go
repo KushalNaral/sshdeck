@@ -29,7 +29,9 @@ type ConnectResult struct {
 	OK       bool   `json:"ok"`
 	Problem  string `json:"problem,omitempty"`
 	Recovery string `json:"recovery,omitempty"`
-	quiet    bool   // not an attempt worth recording in the audit trail
+	// Details is the VPN client's command and output after a failed connect, to read or copy (no password in it).
+	Details string `json:"details,omitempty"`
+	quiet   bool   // not an attempt worth recording in the audit trail
 }
 
 type shell struct {
@@ -142,7 +144,7 @@ func (a *App) connect(serverID string) ConnectResult {
 	case vp == nil && sv.VPNRequired:
 		set("vpn", func(s *Step) { s.Status = "fail" })
 		return fail(sv.Name+" needs a VPN, but no VPN is set.", "Choose its VPN in Admin, then connect again.")
-	case vp != nil && !vpn.Automatic(vp.Kind):
+	case vp != nil && !autoVPN(vp):
 		ch := make(chan struct{}, 1)
 		a.mu.Lock()
 		a.manual[serverID] = ch
@@ -252,15 +254,27 @@ func (a *App) vpnUp(ctx context.Context, v store.VPN, set func(string, func(*Ste
 		}
 		var ce *vpn.CertError
 		if errors.As(err, &ce) {
-			return fail(v.Name+" presented a certificate this computer does not trust.",
-				"If you trust this gateway, open Admin, VPN profiles, edit "+v.Name+" and paste this into Trusted certificate: "+ce.Digest), true
+			res := fail(v.Name+" presented a certificate this computer does not trust.",
+				"If you trust this gateway, open Admin, VPN profiles, edit "+v.Name+", press Fetch from gateway, compare the fingerprint with the administrator's and trust it. Or paste this into Trusted certificate: "+ce.Digest)
+			return res, true
 		}
-		return fail(fmt.Sprintf("%s did not come up: %v", v.Name, err), recovery), true
+		res := fail(fmt.Sprintf("%s did not come up: %v", v.Name, err), recovery)
+		var cerr *vpn.ClientError
+		if errors.As(err, &cerr) {
+			res.Details = "$ " + cerr.Command + "\n" + strings.Join(cerr.Output, "\n")
+		}
+		if strings.Contains(err.Error(), "Failed to complete authentication") {
+			res.Recovery = "The gateway refused the login. Check the user and password. If they are right, this gateway may need single sign-on or a host check that openconnect cannot do: mark the VPN profile as \"I connect this VPN myself\" and use the official GlobalProtect or FortiClient app."
+		}
+		return res, true
 	}
 	set("vpn", func(s *Step) { s.Status, s.Ms, s.Detail = "done", time.Since(t).Milliseconds(), v.Name })
 	a.audit("vpn.up", v.Name, "")
 	return ConnectResult{}, false
 }
+
+// autoVPN reports whether sshdeck itself starts this VPN, as opposed to waiting for you to connect it.
+func autoVPN(v *store.VPN) bool { return vpn.Automatic(v.Kind) && !v.Manual }
 
 // shorten cuts text to at most n characters, with an ellipsis.
 func shorten(s string, n int) string {

@@ -398,3 +398,14 @@ func TestTrustedPinMustBeAPin(t *testing.T) {
 		}
 	}
 }
+
+func TestManualVPNRoundTrips(t *testing.T) {
+	s, _, _ := open(t)
+	v, err := s.SaveVPN(VPN{Name: "Official", Kind: GP, Gateway: "gp.example.org", Port: 443, User: "u", Manual: true}, "pw")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !s.VPNs()[0].Manual || !v.Manual {
+		t.Error("the manual flag was lost")
+	}
+}

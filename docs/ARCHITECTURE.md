@@ -217,6 +217,13 @@ certificate error shown to the user) instead of waiting for an answer nobody can
 client prints is passed through `vpn.WithProgress` (with the password blanked out) to the VPN step's detail text, so a
 slow connect shows what it is doing.
 
+When a VPN step fails, the error is a `vpn.ClientError`: the message as before, plus the command that was run and the
+client's last lines (password blanked out). The connect result carries them as `details`, and the connect bar shows them
+under "Show what the VPN client said" with a Copy button. `gpclient` has no Windows build (only macOS, Linux and BSD), so
+GlobalProtect on Windows goes through openconnect, which cannot do single sign-on or host-integrity checks; a VPN profile
+can be marked **manual** ("I connect this VPN myself"), which treats it like Hillstone: sshdeck waits for the official
+app and your confirmation, and never starts it.
+
 ### Installing openconnect on Windows
 
 Admin, System offers an Install button for openconnect. It asks the elevated helper for one fixed job

@@ -392,6 +392,16 @@ func (e *entry) current() State {
 // hand) is still running. That instance is stopped and the connect tried once more.
 const staleClient = "Another instance of the client is already running"
 
+// ClientError is a failed connect together with what the client was run as and what it printed.
+type ClientError struct {
+	Err     error
+	Command string   // the command line, which never holds the password
+	Output  []string // the client's last lines, with the password blanked out
+}
+
+func (e *ClientError) Error() string { return e.Err.Error() }
+func (e *ClientError) Unwrap() error { return e.Err }
+
 type progressKey struct{}
 
 // WithProgress returns a context that makes Up report each line the client prints while connecting (with the
@@ -474,6 +484,15 @@ func (m *manager) up(ctx context.Context, v store.VPN, secret string) error {
 	m.mu.Unlock()
 
 	var tail []string // the client's recent output, for the error message
+	// fail wraps an error with the command that was run and the client's recent output (password blanked out), so
+	// the UI can show what happened. The wrapped error is unchanged for errors.Is and errors.As.
+	fail := func(err error) error {
+		out := make([]string, len(tail))
+		for i, l := range tail {
+			out[i] = redact(l, secret)
+		}
+		return &ClientError{Err: err, Command: redact(strings.Join(argv, " "), secret), Output: out}
+	}
 	for {
 		select {
 		case line, ok := <-p.Lines():
@@ -488,9 +507,9 @@ func (m *manager) up(ctx context.Context, v store.VPN, secret string) error {
 				}
 				m.setState(v.ID, e, Failed)
 				if len(tail) == 0 {
-					return fmt.Errorf("%s exited before the tunnel came up, without saying why", filepath.Base(argv[1]))
+					return fail(fmt.Errorf("%s exited before the tunnel came up, without saying why", filepath.Base(argv[1])))
 				}
-				return fmt.Errorf("%s could not connect: %w", filepath.Base(argv[1]), explain(tail))
+				return fail(fmt.Errorf("%s could not connect: %w", filepath.Base(argv[1]), explain(tail)))
 			}
 			if line = strings.TrimSpace(line); line != "" {
 				if tail = append(tail, line); len(tail) > 12 {
@@ -518,7 +537,7 @@ func (m *manager) up(ctx context.Context, v store.VPN, secret string) error {
 			if len(tail) > 0 {
 				last = tail[len(tail)-1]
 			}
-			return fmt.Errorf("%s did not come up: %w (last output: %s)", filepath.Base(argv[1]), ctx.Err(), last)
+			return fail(fmt.Errorf("%s did not come up: %w (last output: %s)", filepath.Base(argv[1]), ctx.Err(), last))
 		}
 	}
 }
