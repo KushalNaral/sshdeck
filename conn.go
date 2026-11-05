@@ -142,7 +142,7 @@ func (a *App) connect(serverID string) ConnectResult {
 	case vp == nil && sv.VPNRequired:
 		set("vpn", func(s *Step) { s.Status = "fail" })
 		return fail(sv.Name+" needs a VPN, but no VPN is set.", "Choose its VPN in Admin, then connect again.")
-	case vp != nil && vp.Kind == store.Hillstone:
+	case vp != nil && !vpn.Automatic(vp.Kind):
 		ch := make(chan struct{}, 1)
 		a.mu.Lock()
 		a.manual[serverID] = ch

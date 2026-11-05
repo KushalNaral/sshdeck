@@ -99,13 +99,9 @@ func authMethod(srv store.Server, secret string) (ssh.AuthMethod, func(), error)
 		return ssh.Password(secret), none, nil
 	}
 	if srv.KeyPath == "" {
-		sock := os.Getenv("SSH_AUTH_SOCK")
-		if sock == "" {
-			return nil, none, fmt.Errorf("%s uses key login but sets no key file, and no ssh-agent is running (SSH_AUTH_SOCK is empty): choose a key file in Admin or start ssh-agent", srv.Name)
-		}
-		c, err := net.Dial("unix", sock)
+		c, err := dialAgent(srv.Name)
 		if err != nil {
-			return nil, none, fmt.Errorf("cannot reach the ssh-agent at %s: %w", sock, err)
+			return nil, none, err
 		}
 		return ssh.PublicKeysCallback(agent.NewClient(c).Signers), func() { c.Close() }, nil
 	}

@@ -368,3 +368,18 @@ func TestLoginValidation(t *testing.T) {
 		t.Errorf("unknown login: err = %v, want ErrNotFound", err)
 	}
 }
+
+func TestTrustedCertAcceptsAnOpenconnectPin(t *testing.T) {
+	v := VPN{Name: "G", Kind: GP, Gateway: "gw.example.org", Port: 443, User: "u"}
+	for cert, ok := range map[string]bool{
+		"pin-sha256:" + strings.Repeat("A", 43) + "=":            true,
+		strings.Repeat("ab", 32):                                 true,
+		"pin-sha256:short":                                       false,
+		"pin-sha256:" + strings.Repeat("A", 43) + "= --script x": false,
+	} {
+		v.TrustedCert = cert
+		if err := ValidateVPN(v, ""); (err == nil) != ok {
+			t.Errorf("cert %q: err = %v, want ok=%v", cert, err, ok)
+		}
+	}
+}

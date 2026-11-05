@@ -316,7 +316,7 @@ func ValidateVPN(v VPN, password string) error {
 	case v.Kind != Forti && v.Kind != GP && v.Kind != Hillstone:
 		return invalid("unknown VPN client %q", v.Kind)
 	case v.TrustedCert != "" && !certRe.MatchString(v.TrustedCert):
-		return invalid("trusted certificate must be a 64-character sha256 hex digest")
+		return invalid("trusted certificate must be a 64-character sha256 hex digest, or a pin-sha256:… pin")
 	}
 	return CheckVPN(v, password)
 }
@@ -336,7 +336,8 @@ func CheckVPN(v VPN, password string) error {
 	return nil
 }
 
-var certRe = regexp.MustCompile(`^[0-9a-fA-F]{64}$`)
+// A certificate is pinned by its sha256 digest (openfortivpn) or by openconnect's pin-sha256 form.
+var certRe = regexp.MustCompile(`^([0-9a-fA-F]{64}|pin-sha256:[A-Za-z0-9+/]{43}=)$`)
 
 var slugRe = regexp.MustCompile(`[^a-z0-9]+`)
 

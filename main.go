@@ -3,16 +3,23 @@ package main
 import (
 	"embed"
 	"log"
+	"os"
 
 	"github.com/wailsapp/wails/v2"
 	"github.com/wailsapp/wails/v2/pkg/options"
 	"github.com/wailsapp/wails/v2/pkg/options/assetserver"
+
+	"github.com/KushalNaral/sshdeck/internal/vpn"
 )
 
 //go:embed all:frontend/dist
 var assets embed.FS
 
 func main() {
+	// On Windows the app starts a copy of itself with administrator rights to run VPN clients (see internal/vpn).
+	if len(os.Args) == 4 && os.Args[1] == "--vpn-helper" {
+		os.Exit(vpn.RunHelper(os.Args[2], os.Args[3]))
+	}
 	app, err := NewApp()
 	if err != nil {
 		log.Fatal(err)

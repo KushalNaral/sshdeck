@@ -493,42 +493,55 @@ func TestSweepRemovesOnlyStaleConfigFiles(t *testing.T) {
 	}
 }
 
-// withNet points the interface list at a temp directory the test can add and remove interfaces in.
-func withNet(t *testing.T, names ...string) string {
-	t.Helper()
-	dir := t.TempDir()
-	old := netDir
-	netDir = dir
-	t.Cleanup(func() { netDir = old })
-	for _, n := range names {
-		if err := os.Mkdir(filepath.Join(dir, n), 0o755); err != nil {
-			t.Fatal(err)
-		}
+// fakeNet is the machine's interface list for a test: add and remove interfaces while the VPN manager watches.
+type fakeNet struct {
+	mu sync.Mutex
+	m  map[string]bool // name -> up
+}
+
+func (n *fakeNet) set(name string, up bool) { n.mu.Lock(); n.m[name] = up; n.mu.Unlock() }
+func (n *fakeNet) remove(name string)       { n.mu.Lock(); delete(n.m, name); n.mu.Unlock() }
+func (n *fakeNet) list() []iface {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	var out []iface
+	for k, v := range n.m {
+		out = append(out, iface{k, v})
 	}
-	return dir
+	return out
+}
+
+func withNet(t *testing.T, names ...string) *fakeNet {
+	t.Helper()
+	n := &fakeNet{m: map[string]bool{}}
+	for _, name := range names {
+		n.m[name] = true
+	}
+	old := listInterfaces
+	listInterfaces = n.list
+	t.Cleanup(func() { listInterfaces = old })
+	return n
 }
 
 // bringsUpTunnel is a background client that creates the interface and then exits cleanly.
-func bringsUpTunnel(dir, iface string) func(*fakeProc) {
+func bringsUpTunnel(n *fakeNet, name string) func(*fakeProc) {
 	return func(p *fakeProc) {
-		_ = os.Mkdir(filepath.Join(dir, iface), 0o755)
+		n.set(name, true)
 		printThenExit(nil, "Sign-in complete")(p)
 	}
 }
 
 func TestBackgroundTunnelIsWatchedByItsInterface(t *testing.T) {
 	withClients(t, "gpclient", "openconnect")
-	dir := withNet(t, "lo", "wlp0s20f3", "docker0")
-	m := New(&fakeStarter{script: bringsUpTunnel(dir, "tun0")})
+	n := withNet(t, "lo", "wlp0s20f3", "docker0")
+	m := New(&fakeStarter{script: bringsUpTunnel(n, "tun0")})
 	if err := m.Up(ctx(t), gp, "pw"); err != nil {
 		t.Fatal(err)
 	}
 	if m.Status("gov") != Up {
 		t.Fatalf("status %v, want up while tun0 exists", m.Status("gov"))
 	}
-	if err := os.Remove(filepath.Join(dir, "tun0")); err != nil {
-		t.Fatal(err)
-	}
+	n.remove("tun0")
 	if m.Status("gov") != Down {
 		t.Errorf("status %v, want down once tun0 is gone", m.Status("gov"))
 	}
@@ -536,19 +549,17 @@ func TestBackgroundTunnelIsWatchedByItsInterface(t *testing.T) {
 
 func TestTunnelFlaggedDownCountsAsDown(t *testing.T) {
 	withClients(t, "gpclient", "openconnect")
-	dir := withNet(t, "lo")
-	m := New(&fakeStarter{script: bringsUpTunnel(dir, "tun0")})
+	n := withNet(t, "lo")
+	m := New(&fakeStarter{script: bringsUpTunnel(n, "tun0")})
 	if err := m.Up(ctx(t), gp, "pw"); err != nil {
 		t.Fatal(err)
 	}
-	// tunnel devices usually say "unknown", which is fine
-	_ = os.WriteFile(filepath.Join(dir, "tun0", "operstate"), []byte("unknown\n"), 0o644)
 	if m.Status("gov") != Up {
-		t.Fatal("operstate unknown must count as up")
+		t.Fatal("an interface that is up counts as up")
 	}
-	_ = os.WriteFile(filepath.Join(dir, "tun0", "operstate"), []byte("down\n"), 0o644)
+	n.set("tun0", false)
 	if m.Status("gov") != Down {
-		t.Error("operstate down must count as down")
+		t.Error("an interface flagged down must count as down")
 	}
 }
 
@@ -566,20 +577,20 @@ func TestOnlyANewInterfaceIsTheTunnelAndNoneMeansTrustTheClient(t *testing.T) {
 
 func TestDockerBridgeAppearingIsNotTheTunnel(t *testing.T) {
 	withClients(t, "gpclient", "openconnect")
-	dir := withNet(t, "lo")
+	n := withNet(t, "lo")
 	m := New(&fakeStarter{script: func(p *fakeProc) {
-		_ = os.Mkdir(filepath.Join(dir, "br-abc123"), 0o755)
-		_ = os.Mkdir(filepath.Join(dir, "tun1"), 0o755)
+		n.set("br-abc123", true)
+		n.set("tun1", true)
 		printThenExit(nil, "Sign-in complete")(p)
 	}})
 	if err := m.Up(ctx(t), gp, "pw"); err != nil {
 		t.Fatal(err)
 	}
-	_ = os.Remove(filepath.Join(dir, "br-abc123")) // a bridge coming and going changes nothing
+	n.remove("br-abc123") // a bridge coming and going changes nothing
 	if m.Status("gov") != Up {
 		t.Error("the bridge must not be mistaken for the tunnel")
 	}
-	_ = os.Remove(filepath.Join(dir, "tun1"))
+	n.remove("tun1")
 	if m.Status("gov") != Down {
 		t.Error("tun1 is the tunnel")
 	}
@@ -633,5 +644,110 @@ func TestStaleGpclientIsOnlyRetriedOnce(t *testing.T) {
 	}
 	if len(s.argvs) != 3 {
 		t.Errorf("commands = %d, want 3 (no endless loop)", len(s.argvs))
+	}
+}
+
+func TestAutomaticDependsOnTheClientAndTheSystem(t *testing.T) {
+	if Automatic(store.Hillstone) {
+		t.Error("Hillstone has no client: always manual")
+	}
+	if !Automatic(store.GP) || !Automatic(store.Forti) {
+		t.Error("GP and Forti are automatic on Linux")
+	}
+}
+
+// asWindows makes command() build Windows-style commands: openconnect for both kinds, no pkexec.
+func asWindows(t *testing.T) {
+	t.Helper()
+	old, oldLook := goos, lookPath
+	goos = "windows"
+	lookPath = func(n string) (string, error) { return "/Program Files/OpenConnect/" + n + ".exe", nil }
+	t.Cleanup(func() { goos, lookPath = old, oldLook })
+}
+
+func TestWindowsGlobalProtectUsesOpenconnectDirectly(t *testing.T) {
+	asWindows(t)
+	f := &fakeStarter{script: printThenStay("Connected as 10.0.0.2, using SSL")}
+	if err := New(f).Up(ctx(t), gp, "hunter2"); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"/Program Files/OpenConnect/openconnect.exe", "--protocol=gp", "--user", "support", "--passwd-on-stdin", "connect.example.gov"}
+	if !slices.Equal(f.argv, want) {
+		t.Fatalf("argv %v\nwant %v", f.argv, want)
+	}
+	if f.stdin != "hunter2\n" || strings.Contains(strings.Join(f.argv, " "), "hunter2") {
+		t.Errorf("the password belongs on stdin only: argv %v stdin %q", f.argv, f.stdin)
+	}
+	if err := validateOpenconnectArgs(f.argv[1:]); err != nil {
+		t.Errorf("the helper would refuse our own command: %v", err)
+	}
+}
+
+func TestWindowsFortinetUsesOpenconnectToo(t *testing.T) {
+	asWindows(t)
+	f := &fakeStarter{script: printThenStay("Connected as 10.1.1.9, using SSL")}
+	if err := New(f).Up(ctx(t), forti, "pw"); err != nil {
+		t.Fatal(err)
+	}
+	if f.argv[1] != "--protocol=fortinet" || f.argv[len(f.argv)-1] != "203.0.113.50:10443" {
+		t.Fatalf("argv %v", f.argv)
+	}
+	if err := validateOpenconnectArgs(f.argv[1:]); err != nil {
+		t.Errorf("the helper would refuse our own command: %v", err)
+	}
+}
+
+func TestWindowsCertificatePinsAreNotMangled(t *testing.T) {
+	asWindows(t)
+	pin := "pin-sha256:" + strings.Repeat("A", 43) + "="
+	hex := strings.Repeat("ab", 32)
+	for _, c := range []struct{ stored, want string }{{pin, pin}, {hex, "sha256:" + hex}} {
+		v := gp
+		v.TrustedCert = c.stored
+		f := &fakeStarter{script: printThenStay("Connected as 10.0.0.2")}
+		if err := New(f).Up(ctx(t), v, "pw"); err != nil {
+			t.Fatal(err)
+		}
+		i := slices.Index(f.argv, "--servercert")
+		if i < 0 || f.argv[i+1] != c.want {
+			t.Errorf("stored %q: argv %v, want --servercert %s", c.stored, f.argv, c.want)
+		}
+		if err := validateOpenconnectArgs(f.argv[1:]); err != nil {
+			t.Errorf("the helper would refuse our own command: %v", err)
+		}
+	}
+}
+
+func TestOpenconnectCertificateHintGivesThePin(t *testing.T) {
+	pin := "pin-sha256:" + strings.Repeat("B", 43) + "="
+	f := &fakeStarter{script: printThenExit(errors.New("exit status 1"),
+		"Certificate from VPN server \"vpn.example.org\" failed verification.",
+		"To trust this server in future, perhaps add this to your command line:",
+		"    --servercert "+pin)}
+	asWindows(t)
+	err := New(f).Up(ctx(t), gp, "pw")
+	var ce *CertError
+	if !errors.As(err, &ce) || ce.Digest != pin {
+		t.Fatalf("want a CertError with the pin, got %v", err)
+	}
+}
+
+func TestWindowsVPNsAreAutomaticExceptHillstone(t *testing.T) {
+	asWindows(t)
+	if !Automatic(store.GP) || !Automatic(store.Forti) || Automatic(store.Hillstone) {
+		t.Error("Automatic on Windows: GP and Forti yes, Hillstone no")
+	}
+	if Tool(store.Forti) != "openconnect" || Tool(store.GP) != "openconnect" {
+		t.Error("openconnect drives both kinds on Windows")
+	}
+}
+
+func TestOpenfortivpnRefusesAPinFormat(t *testing.T) {
+	withClients(t, "openfortivpn")
+	v := forti
+	v.TrustedCert = "pin-sha256:" + strings.Repeat("A", 43) + "="
+	err := New(&fakeStarter{script: printThenStay("Tunnel is up")}).Up(ctx(t), v, "pw")
+	if err == nil || !strings.Contains(err.Error(), "digest") {
+		t.Errorf("err = %v: openfortivpn needs the sha256 digest, not an openconnect pin", err)
 	}
 }

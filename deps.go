@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os/exec"
+	"runtime"
 	"slices"
 )
 
@@ -26,6 +27,10 @@ var deps = []Dep{
 
 // CheckDependencies reports which required programs are on this machine.
 func (a *App) CheckDependencies() []Dep {
+	if runtime.GOOS == "windows" { // the Linux clients below do not exist here; openconnect covers both VPN types
+		_, err := a.lookPath("openconnect")
+		return []Dep{{Name: "openconnect", Purpose: "VPN client for GlobalProtect and FortiClient. Install OpenConnect for all users (it needs the Wintun driver); the OpenConnect-GUI installer includes both. Starting a VPN asks for administrator approval.", Installed: err == nil}}
+	}
 	out := slices.Clone(deps)
 	for i := range out {
 		_, err := a.lookPath(out[i].Name)

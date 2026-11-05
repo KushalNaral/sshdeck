@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"syscall"
 )
 
 // ownFiles are the files sshdeck keeps in its config directory; they hold host lists, keys or the encrypted vault.
@@ -20,7 +19,6 @@ func checkConfigDir(dir string) error {
 	if err := os.Chmod(dir, 0o700); err != nil {
 		return fmt.Errorf("cannot make %s private: %w", dir, err)
 	}
-	me := uint32(os.Geteuid())
 	for _, name := range ownFiles {
 		p := filepath.Join(dir, name)
 		st, err := os.Lstat(p)
@@ -33,8 +31,8 @@ func checkConfigDir(dir string) error {
 		if st.Mode()&os.ModeSymlink != 0 {
 			return fmt.Errorf("%s is a symbolic link; sshdeck will not follow it. Move the real file into place and try again", p)
 		}
-		if sys, ok := st.Sys().(*syscall.Stat_t); ok && sys.Uid != me {
-			return fmt.Errorf("%s belongs to another user (uid %d)", p, sys.Uid)
+		if who, other := ownedByAnotherUser(st); other {
+			return fmt.Errorf("%s belongs to another user (%s)", p, who)
 		}
 		if st.Mode().Perm() != 0o600 {
 			if err := os.Chmod(p, 0o600); err != nil {

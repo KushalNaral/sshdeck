@@ -1,6 +1,6 @@
 name: release
 
-# Pushing a tag such as v0.4.0 builds the Linux tarball and attaches it to a GitHub release.
+# Pushing a tag such as v0.4.0 builds the Linux tarball and the Windows zip and attaches them to a GitHub release.
 on:
   push:
     tags: ["v*"]
@@ -27,13 +27,20 @@ jobs:
           go install golang.org/x/vuln/cmd/govulncheck@latest
           echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
       - name: Test
-        run: go test -short ./... && (cd frontend && npm ci && npm test)
+        run: GOOS=windows go vet ./... && go test -short ./... && (cd frontend && npm ci && npm test)
       - name: Package
         run: ./packaging/package.sh "${{ github.ref_name }}"
+      - name: Package for Windows
+        run: |
+          wails build -platform windows/amd64 -clean
+          d="sshdeck-${{ github.ref_name }}-windows-amd64"
+          mkdir -p "dist/$d" && cp build/bin/sshdeck.exe "dist/$d/"
+          (cd dist && zip -qr "$d.zip" "$d" && sha256sum *.tar.gz *.zip > SHA256SUMS)
       - name: Publish
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release create "${{ github.ref_name }}" \
-            "dist/sshdeck-${{ github.ref_name }}-linux-amd64.tar.gz" dist/SHA256SUMS \
-            --title "sshdeck ${{ github.ref_name }}" --generate-notes
+            "dist/sshdeck-${{ github.ref_name }}-linux-amd64.tar.gz" \
+            "dist/sshdeck-${{ github.ref_name }}-windows-amd64.zip" dist/SHA256SUMS \
+            --title "sshdeck ${{ github.ref_name }}" --generate-notes $(case "${{ github.ref_name }}" in *-*) echo --prerelease;; esac)

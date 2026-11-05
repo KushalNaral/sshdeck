@@ -188,6 +188,21 @@ no pinning is needed. Only pin a digest you have reason to trust.
 gpclient refuses to start while an earlier background instance is running (a tunnel that died, or one started by hand).
 When it says so, `vpn.Up` runs `gpclient disconnect` and tries the connect once more.
 
+### VPNs on Windows
+
+Windows has no `pkexec`, and a normal process cannot read the output of or stop an elevated one. So the first VPN
+start in a session launches a second copy of the app, `sshdeck.exe --vpn-helper ADDR TOKEN`, with the UAC prompt
+(`internal/vpn/helper_windows.go`). The helper connects back over loopback, proves it knows a one-time token, and then
+runs clients on request; the app talks to it through `HelperStarter`, which is just another `Starter`, so the manager,
+reconnect and tunnel watching are unchanged. The helper runs nothing but `openconnect`, from Program Files, with the
+options `validateOpenconnectArgs` accepts (no `--script`, no file options), so a process that learned the token still
+cannot make it run something else. It stops its clients and exits when the app closes the connection. `openconnect`
+handles both protocols there (`--protocol=gp` and `--protocol=fortinet`). A certificate is trusted with
+`--servercert pin-sha256:...`, which is what openconnect prints when verification fails.
+
+The protocol, the allow-list and the process handling are ordinary Go and are tested on Linux; only the elevated launch
+is Windows-only, and the whole path has not been run against a real gateway.
+
 ## 7. SSH details
 
 - **Auth:** password, a private key file (its passphrase, if any, is the stored secret), or the running

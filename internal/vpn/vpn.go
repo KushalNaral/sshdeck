@@ -7,13 +7,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 
 	"github.com/KushalNaral/sshdeck/internal/store"
@@ -92,6 +92,7 @@ func (e *CertError) Error() string {
 
 var (
 	certRe = regexp.MustCompile(`--trusted-cert\s+([0-9a-fA-F]{64})`)
+	pinRe  = regexp.MustCompile(`--servercert\s+(pin-sha256:[A-Za-z0-9+/]{43}=)`) // what openconnect suggests
 	hexRe  = regexp.MustCompile(`\b([0-9a-fA-F]{64})\b`)
 )
 
@@ -105,33 +106,10 @@ func runtimeDir() string {
 
 // lookPath and rootOwned are swapped in tests.
 var (
-	lookPath  = exec.LookPath
+	lookPath  = defaultLookPath
 	rootOwned = checkRootOwned
+	goos      = runtime.GOOS // a variable so tests can build Windows commands on Linux
 )
-
-// checkRootOwned refuses a program that an ordinary user could replace. The VPN clients run as root after one
-// password prompt, so a binary in a user-writable place (or in a user-writable directory) must not be run.
-func checkRootOwned(path string) error {
-	real, err := filepath.EvalSymlinks(path)
-	if err != nil {
-		return err
-	}
-	for p := real; ; p = filepath.Dir(p) {
-		st, err := os.Stat(p)
-		if err != nil {
-			return err
-		}
-		if sys, ok := st.Sys().(*syscall.Stat_t); ok && sys.Uid != 0 {
-			return fmt.Errorf("%s is not owned by root", p)
-		}
-		if st.Mode().Perm()&0o022 != 0 {
-			return fmt.Errorf("%s can be changed by someone other than root", p)
-		}
-		if p == "/" {
-			return nil
-		}
-	}
-}
 
 // SweepStale deletes config files left by an earlier run that was killed mid-connect (they hold a VPN password).
 // Files younger than olderThan are kept, since a connect may be using them. It returns how many it removed.
@@ -170,9 +148,21 @@ func resolve(name string) (string, error) {
 	return p, nil
 }
 
+// LookPath finds a VPN client the way sshdeck itself will run it.
+func LookPath(file string) (string, error) { return lookPath(file) }
+
+// Automatic reports whether sshdeck can start and stop this kind of VPN itself on this system. Where it cannot,
+// the connect flow waits for you to connect it by hand, as for Hillstone.
+func Automatic(k store.VPNKind) bool {
+	return k == store.Forti || k == store.GP
+}
+
 // Tool is the program that connects a VPN of this kind. GlobalProtect prefers gpclient (portal and gateway
 // sign-in, which plain openconnect fails on some gateways) and falls back to openconnect.
 func Tool(k store.VPNKind) string {
+	if goos == "windows" && (k == store.Forti || k == store.GP) {
+		return "openconnect" // the only client with Windows builds; it speaks both protocols
+	}
 	switch k {
 	case store.Forti:
 		return "openfortivpn"
@@ -197,6 +187,9 @@ func command(v store.VPN, secret string) (argv []string, stdin, ready string, st
 	if v.Kind == store.Hillstone {
 		return nil, "", "", nil, cleanup, ErrManual
 	}
+	if goos == "windows" {
+		return windowsCommand(v, secret)
+	}
 	pk, err := resolve("pkexec")
 	if err != nil {
 		return nil, "", "", nil, cleanup, err
@@ -209,6 +202,9 @@ func command(v store.VPN, secret string) (argv []string, stdin, ready string, st
 	}
 	switch v.Kind {
 	case store.Forti:
+		if strings.HasPrefix(v.TrustedCert, "pin-sha256:") {
+			return nil, "", "", nil, cleanup, errors.New("openfortivpn needs the certificate's sha256 digest (64 hex digits), not an openconnect pin: edit the VPN profile")
+		}
 		f, err := os.CreateTemp(runtimeDir(), "sshdeck-vpn-*.conf")
 		if err != nil {
 			return nil, "", "", nil, nil, err
@@ -249,9 +245,38 @@ func command(v store.VPN, secret string) (argv []string, stdin, ready string, st
 	return nil, "", "", nil, cleanup, fmt.Errorf("vpn: unknown client %q", v.Kind)
 }
 
+// windowsCommand runs openconnect for both GlobalProtect and Fortinet. It is started by the elevated helper, so there
+// is no pkexec; the helper checks the command again before running it. The password goes on stdin.
+func windowsCommand(v store.VPN, secret string) (argv []string, stdin, ready string, stop []string, cleanup func(), err error) {
+	cleanup = func() {}
+	tool, err := resolve("openconnect")
+	if err != nil {
+		return nil, "", "", nil, cleanup, err
+	}
+	proto := "--protocol=gp"
+	if v.Kind == store.Forti {
+		proto = "--protocol=fortinet"
+	}
+	server := v.Gateway
+	if v.Port != 443 {
+		server = fmt.Sprintf("%s:%d", v.Gateway, v.Port)
+	}
+	argv = []string{tool, proto, "--user", v.User, "--passwd-on-stdin"}
+	if c := v.TrustedCert; c != "" {
+		if !strings.HasPrefix(c, "pin-sha256:") {
+			c = "sha256:" + c
+		}
+		argv = append(argv, "--servercert", c)
+	}
+	return append(argv, server), secret + "\n", "Connected as", nil, cleanup, nil
+}
+
 // explain turns the client's last output lines into one error: its ERROR lines, or else the last line.
 func explain(lines []string) error {
 	all := strings.Join(lines, "\n")
+	if m := pinRe.FindStringSubmatch(all); m != nil {
+		return &CertError{Digest: m[1]}
+	}
 	if m := certRe.FindStringSubmatch(all); m != nil {
 		return &CertError{Digest: m[1]}
 	}
@@ -273,18 +298,29 @@ func explain(lines []string) error {
 	return errors.New(strings.Join(errs, "; "))
 }
 
-// netDir lists the machine's network interfaces (a seam for tests). tunWait is how long to look for a new one.
+// iface is one network interface. listInterfaces is a seam for tests; tunWait is how long to look for a new one.
+type iface struct {
+	Name string
+	Up   bool
+}
+
 var (
-	netDir  = "/sys/class/net"
+	listInterfaces = func() []iface {
+		var out []iface
+		if all, err := net.Interfaces(); err == nil {
+			for _, i := range all {
+				out = append(out, iface{i.Name, i.Flags&net.FlagUp != 0})
+			}
+		}
+		return out
+	}
 	tunWait = 3 * time.Second
 )
 
 func interfaces() map[string]bool {
 	out := map[string]bool{}
-	if es, err := os.ReadDir(netDir); err == nil {
-		for _, e := range es {
-			out[e.Name()] = true
-		}
+	for _, i := range listInterfaces() {
+		out[i.Name] = true
 	}
 	return out
 }
@@ -314,14 +350,14 @@ func newTunnel(before map[string]bool, wait time.Duration) string {
 	}
 }
 
-// tunnelAlive is false once the interface is gone or flagged down. Tunnel devices report "unknown", which is fine.
+// tunnelAlive is false once the interface is gone or down.
 func tunnelAlive(name string) bool {
-	if _, err := os.Stat(filepath.Join(netDir, name)); err != nil {
-		return false
+	for _, i := range listInterfaces() {
+		if i.Name == name {
+			return i.Up
+		}
 	}
-	b, _ := os.ReadFile(filepath.Join(netDir, name, "operstate"))
-	st := strings.TrimSpace(string(b))
-	return st != "down" && st != "notpresent"
+	return false
 }
 
 // current is the entry's state, with a dead tunnel counted as Down. m.mu must be held.

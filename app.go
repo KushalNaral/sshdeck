@@ -3,9 +3,9 @@ package main
 import (
 	"context"
 	"fmt"
+	"io"
 	"log"
 	"os"
-	"os/exec"
 	"os/user"
 	"path/filepath"
 	"sync"
@@ -22,9 +22,10 @@ import (
 
 // App holds the Go side the UI calls through Wails bindings.
 type App struct {
-	ctx context.Context
-	st  *store.Store
-	vpn vpn.Manager
+	ctx     context.Context
+	st      *store.Store
+	vpn     vpn.Manager
+	starter vpn.Starter // what runs VPN clients; closed at shutdown (on Windows that ends the elevated helper)
 
 	// Seams so tests can run without a window or a network.
 	emit     func(name string, data ...any)
@@ -74,7 +75,9 @@ func NewApp() (*App, error) {
 		return nil, err
 	}
 	vpn.SweepStale(vpn.StaleDir(), time.Minute) // a killed connect can leave a config file holding a VPN password
-	a := newApp(st, vpn.New(vpn.ExecStarter{}), sshx.Dial)
+	starter := vpn.DefaultStarter()
+	a := newApp(st, vpn.New(starter), sshx.Dial)
+	a.starter = starter
 	a.vaultPath, a.settingsPath, a.plainPath = filepath.Join(base, "vault.enc"), filepath.Join(base, "settings.json"), filepath.Join(base, "data.json")
 	a.settings = loadSettings(a.settingsPath)
 	actor := "unknown"
@@ -98,7 +101,7 @@ func NewApp() (*App, error) {
 
 func newApp(st *store.Store, m vpn.Manager, dial func(context.Context, store.Server, string) (sshx.Client, error)) *App {
 	return &App{
-		ctx: context.Background(), st: st, vpn: m, dial: dial, lookPath: exec.LookPath,
+		ctx: context.Background(), st: st, vpn: m, dial: dial, lookPath: vpn.LookPath,
 		emit: func(string, ...any) {}, audit: func(string, string, string) {},
 		clipSet: func(string) error { return nil }, clipGet: func() (string, error) { return "", nil }, clipTTL: clipboardTTL,
 		secrets: store.Keyring{}, clock: time.Now, vpnPoll: 5 * time.Second, backoff: []time.Duration{2 * time.Second, 4 * time.Second, 8 * time.Second, 16 * time.Second, 30 * time.Second}, settings: defaultSettings(), lastActive: time.Now(),
@@ -122,6 +125,9 @@ func (a *App) startup(ctx context.Context) {
 func (a *App) shutdown(context.Context) {
 	a.audit("app.stop", "", "")
 	a.disconnectAll()
+	if c, ok := a.starter.(io.Closer); ok {
+		_ = c.Close()
+	}
 }
 
 func (a *App) disconnectAll() {
