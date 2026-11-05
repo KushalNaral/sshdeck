@@ -1,29 +1,68 @@
 # sshdeck
 
-Desktop app (Wails v2: Go + React) for SSH sessions, VPN control and read-only server analysis.
+A Linux desktop app for keeping SSH logins and VPN profiles in one place. Pick a server and it brings up the VPN if
+one is needed, logs in over SSH and opens a terminal. It also reads each server and ranks them by what needs doing.
 
-## Develop
+![sshdeck connected to a server through a VPN](docs/screenshots/overview.jpg)
 
-Needs Go, Node, the `wails` CLI and, on Linux, `pkg-config libgtk-3-dev libwebkit2gtk-4.1-dev`.
+## Features
+
+- SSH logins by password, key file or ssh-agent; shells open in tabs over one shared connection
+- VPN profiles for FortiClient (`openfortivpn`) and GlobalProtect (`gpclient` or `openconnect`). Hillstone has no
+  Linux client, so you connect it yourself and confirm in the app.
+- `docker exec` shells inside containers
+- Read-only scan of each server: OS, memory, disks, failed services, containers and software versions
+- Servers ranked 1 to 5 by failed services, full disks, outdated software and overdue tasks, with the reasons shown
+- Tasks tied to servers
+- Reconnects when an SSH link or VPN tunnel drops
+- Import and export as CSV
+- Passwords in the OS keyring, or in an encrypted vault behind a passphrase; audit log of what was done
+
+![Tasks](docs/screenshots/tasks.jpg)
+
+## Install
+
+Needs Linux with GTK 3 and WebKitGTK 4.1 (`libgtk-3-0` and `libwebkit2gtk-4.1-0` on Debian and Ubuntu).
+
+Download the tarball from the [latest release](../../releases/latest), then:
 
 ```sh
-wails dev -tags webkit2_41      # live reload
-wails build -tags webkit2_41    # binary in build/bin
-go test ./...                   # Go tests
-cd frontend && npm test         # UI logic tests
+tar xzf sshdeck-v*-linux-amd64.tar.gz
+cd sshdeck-v*-linux-amd64
+./install.sh
 ```
 
-How it fits together: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). Optional organisation mode (not built): [docs/ORG-MODE.md](docs/ORG-MODE.md).
+This checks the files against `SHA256SUMS` and installs into `~/.local/bin` for the current user. Admin, System lists
+the VPN clients that are missing and installs them. Starting a VPN asks for your password through `pkexec`.
 
-Server and VPN metadata live in `~/.config/sshdeck/data.json` (mode 0600). Passwords live only in the OS keyring (or in the encrypted vault when the passphrase lock is on).
+## Usage
 
-## Bringing your servers in
+1. Admin, VPN profiles: add a profile if some servers are behind a VPN.
+2. Admin, Servers: add a server with its host, user and password or key, and pick its VPN.
+3. Firefight: select the server and press Connect.
 
-Admin has an **Import** tab. Save a spreadsheet as CSV (it can hold VPNs, servers and other logins; "Save a blank
-template" shows the columns), choose it, review each row and import. A row with the name of something you already
-have updates it, and a blank password keeps the stored one. Passwords are read in Go and never shown. "Export all"
-writes the same format without passwords.
+Ctrl+K finds a server, Ctrl+T opens a shell tab, Ctrl+1/2/3 switch between Firefight, Tasks and Admin, and
+Ctrl+Shift+F searches the terminal.
 
-Each server can also track software versions (PHP, Node, Redis and so on), hold other logins (database, cPanel, RDP;
-copy-only, the clipboard clears after 30 seconds), reconnect by itself when the link drops, and connect when
-sshdeck starts.
+To bring in many servers at once, use Admin, Import. "Save a blank template" gives you the CSV columns; each row is
+shown as new, update or error before anything is saved, and a blank password keeps the stored one.
+
+The passphrase lock is in Admin, Security. There is no recovery if the passphrase is lost.
+
+Data lives in `~/.config/sshdeck/`.
+
+## Build from source
+
+Needs Go, Node, the [`wails`](https://wails.io) CLI (`go install github.com/wailsapp/wails/v2/cmd/wails@latest`) and,
+on Debian or Ubuntu, `pkg-config libgtk-3-dev libwebkit2gtk-4.1-dev`.
+
+```sh
+git clone https://github.com/KushalNaral/sshdeck.git
+cd sshdeck
+wails build -tags webkit2_41     # binary in build/bin/sshdeck
+```
+
+For development use `wails dev -tags webkit2_41`, and run the tests with `go test ./... && (cd frontend && npm test)`.
+`./packaging/package.sh v0.3.0` builds the same tarball that the releases carry.
+
+See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for how it works and [DESIGN.md](DESIGN.md) for the look.

@@ -1,6 +1,6 @@
 import type { Server, Vpn } from './types'
 
-// Demo data: server and project names follow the master project list; hosts and users are synthetic.
+// Demo data for the browser build: every name, host and user is made up.
 // The real list arrives through the importer; passwords never live in the frontend.
 const s = (
   id: string,
@@ -33,8 +33,8 @@ const s = (
 })
 
 export const SERVERS: Server[] = [
-  s('atlas', 'Atlas Server', null, 'CentOS 7', '7.4.27', '8.2.35', 'Apache 2.4', ['Community Portal', 'Member Directory', 'Co-op Ledger', 'Atlas Consult', 'Charity Site'], 'filled'),
-  s('birch', 'Birch Production', null, 'Ubuntu 22.04.4', '8.2.25', '8.2.35', 'Nginx 1.18', ['Savings Portal', 'Trade Desk', 'Alumni Site', 'Capital Site', 'Co-op Site', 'School Site', 'Events Site', 'Consulting Site'], 'filled'),
+  s('atlas', 'Atlas Server', null, 'CentOS 7', '7.4.27', '8.2.35', 'Apache 2.4', ['Community Portal', 'Member Directory', 'Co-op Ledger'], 'filled'),
+  s('birch', 'Birch Production', null, 'Ubuntu 22.04.4', '8.2.25', '8.2.35', 'Nginx 1.18', ['Savings Portal', 'Trade Desk', 'Alumni Site', 'Events Site'], 'filled'),
   s('cedar', 'Cedar Server', null, 'Ubuntu 22.04.5', '8.3.19', '8.3.36', 'Nginx 1.18', ['Retail Dashboard'], 'filled'),
   s('delta', 'Delta Production', null, 'Ubuntu 24.04.1', '8.2.35', '8.2.35', 'Nginx 1.24', ['Company Website'], 'filled', 'Also runs Jenkins'),
   s('elm', 'Elm Production', null, 'Ubuntu 22.04', '8.2.35', '8.2.35', 'Apache 2.4', ['Furniture Shop'], 'filled'),
@@ -44,10 +44,10 @@ export const SERVERS: Server[] = [
   s('harbor', 'Harbor Server', null, 'Ubuntu 20.04.5', '7.4.3', '8.4.35', 'Apache 2.4', ['Logistics Tracker'], 'filled'),
   s('ivy', 'Ivy Server', null, 'Ubuntu 22.04.5', '8.4.27', '8.4.27', 'Nginx 1.24', ['Capital Fund Site'], 'filled'),
   s('juniper', 'Juniper Server', null, 'Ubuntu 24.04', '8.4.24', '8.4.27', 'Nginx 1.24', ['Health Survey', 'Reports Site'], 'filled'),
-  s('pine', 'Pine Monitoring', 'forti-hq', 'Ubuntu 26.04', '8.2.33', '8.2.35', 'Apache 2.4', ['Pine Monitoring'], 'filled'),
-  s('quartz', 'Quartz Reports', 'forti-lab', 'Ubuntu 26.04', '8.5.4', '8.5.12', 'Nginx 1.28', ['Quartz Reports'], 'struck', '2 failed services'),
-  s('ruby', 'Ruby Portal', 'gp-partner', 'CentOS 7', '7.2.34', '8.2.35', 'Apache 2.4', ['Ruby Portal'], 'hollow', 'Not patchable: CodeIgniter 2'),
-  s('sable', 'Sable Server', 'hill-branch', 'Ubuntu 20.04.6', '8.2.8', '8.2.35', 'Apache 2.4', ['Sable'], 'hollow'),
+  s('pine', 'Pine Monitoring', 'forti-hq', 'Ubuntu 26.04', '8.2.33', '8.2.35', 'Apache 2.4', ['Monitoring'], 'filled'),
+  s('quartz', 'Quartz Reports', 'forti-lab', 'Ubuntu 26.04', '8.5.4', '8.5.12', 'Nginx 1.28', ['Reports'], 'struck', '2 failed services'),
+  s('ruby', 'Ruby Portal', 'gp-partner', 'CentOS 7', '7.2.34', '8.2.35', 'Apache 2.4', ['Partner Portal'], 'hollow', 'Not patchable: CodeIgniter 2'),
+  s('sable', 'Sable Server', 'hill-branch', 'Ubuntu 20.04.6', '8.2.8', '8.2.35', 'Apache 2.4', ['Branch Tools'], 'hollow'),
   s('tundra', 'Tundra Server', 'req', 'Ubuntu 22.04.4', '8.2.27', '8.2.35', 'Nginx 1.18', ['Audit Archive'], 'hollow', 'VPN required, type not recorded'),
 ]
 
