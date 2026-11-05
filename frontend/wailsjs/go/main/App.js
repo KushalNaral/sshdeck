@@ -6,6 +6,10 @@ export function Analyze(arg1) {
   return window['go']['main']['App']['Analyze'](arg1);
 }
 
+export function ApplyImport(arg1, arg2) {
+  return window['go']['main']['App']['ApplyImport'](arg1, arg2);
+}
+
 export function AttachShell(arg1, arg2, arg3, arg4) {
   return window['go']['main']['App']['AttachShell'](arg1, arg2, arg3, arg4);
 }
@@ -30,6 +34,18 @@ export function Connect(arg1) {
   return window['go']['main']['App']['Connect'](arg1);
 }
 
+export function CopyLogin(arg1, arg2, arg3) {
+  return window['go']['main']['App']['CopyLogin'](arg1, arg2, arg3);
+}
+
+export function CopySSHCommand(arg1) {
+  return window['go']['main']['App']['CopySSHCommand'](arg1);
+}
+
+export function DeleteLogin(arg1, arg2) {
+  return window['go']['main']['App']['DeleteLogin'](arg1, arg2);
+}
+
 export function DeleteServer(arg1) {
   return window['go']['main']['App']['DeleteServer'](arg1);
 }
@@ -52,6 +68,10 @@ export function Disconnect(arg1) {
 
 export function EnableLock(arg1) {
   return window['go']['main']['App']['EnableLock'](arg1);
+}
+
+export function ExportCSV() {
+  return window['go']['main']['App']['ExportCSV']();
 }
 
 export function InstallDependencies(arg1) {
@@ -86,8 +106,16 @@ export function OpenContainerShell(arg1, arg2, arg3, arg4, arg5) {
   return window['go']['main']['App']['OpenContainerShell'](arg1, arg2, arg3, arg4, arg5);
 }
 
+export function PickImport() {
+  return window['go']['main']['App']['PickImport']();
+}
+
 export function RecordConfirm(arg1, arg2) {
   return window['go']['main']['App']['RecordConfirm'](arg1, arg2);
+}
+
+export function SaveLogin(arg1, arg2, arg3) {
+  return window['go']['main']['App']['SaveLogin'](arg1, arg2, arg3);
 }
 
 export function SaveServer(arg1, arg2) {
@@ -98,8 +126,16 @@ export function SaveTask(arg1) {
   return window['go']['main']['App']['SaveTask'](arg1);
 }
 
+export function SaveTemplate() {
+  return window['go']['main']['App']['SaveTemplate']();
+}
+
 export function SaveVPN(arg1, arg2) {
   return window['go']['main']['App']['SaveVPN'](arg1, arg2);
+}
+
+export function SetAutoReconnect(arg1) {
+  return window['go']['main']['App']['SetAutoReconnect'](arg1);
 }
 
 export function SetLockSettings(arg1, arg2) {

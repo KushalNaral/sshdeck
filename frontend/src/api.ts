@@ -1,10 +1,12 @@
-import type { Analysis, Dep, Server, Step, Vpn } from './types'
+import type { Analysis, Dep, Link, Server, Step, Vpn } from './types'
 
 /** Everything the UI needs from the Go side. The Wails bindings will implement this same shape. */
 export interface Backend {
   connect(server: Server, vpn: Vpn | undefined, onSteps: (steps: Step[]) => void): Promise<void>
   confirmManualVpn(serverId: string): void
   disconnect(serverId: string): void
+  /** Hears about a dropped connection being redialled. Returns a function that stops listening. */
+  onLink(serverId: string, cb: (l: Link) => void): () => void
   analyze(server: Server): Promise<Analysis>
   /** Start a shell's output flowing into onData. Resolves with a function that stops listening. Rejects if the shell cannot open. */
   attach(serverId: string, tab: number, size: { cols: number; rows: number }, onData: (d: string | Uint8Array) => void, onEnd: () => void): Promise<() => void>
@@ -42,9 +44,11 @@ function makeAnalysis(server: Server): Analysis {
     os: server.os,
     kernel: `5.15.0-${100 + (h % 60)}-generic`,
     uptime: `${20 + (h % 300)} days`,
-    php: server.php,
-    webserver: server.webserver,
-    db: h % 2 ? 'MySQL 8.0.36' : 'MariaDB 10.6.16',
+    software: [
+      ...server.software.map((x) => ({ name: x.name, version: x.version })),
+      { name: h % 2 ? 'MySQL' : 'MariaDB', version: h % 2 ? '8.0.36' : '10.6.16' },
+      { name: 'Node', version: '18.19.1' },
+    ],
     cpu: 2 + (h % 3) * 2,
     memTotalMb: 8192,
     memUsedMb: 2600 + (h % 4500),
@@ -105,6 +109,7 @@ export const mockBackend: Backend = {
     return makeAnalysis(server)
   },
   disconnect: () => {},
+  onLink: () => () => {},
   async attach(serverId, tab, _size, onData) {
     const server = demoServers.get(serverId)!
     const inBox = containerTabs.get(`${serverId}:${tab}`)
@@ -166,7 +171,7 @@ function runDemo(server: Server, line: string): string {
     const out = (s: string) => s.replace(/\n/g, '\r\n') + '\r\n'
     if (!cmd) return ''
     if (cmd === 'uptime') return out(` up ${a.uptime}, 1 user, load average: 0.42, 0.51, 0.47`)
-    if (cmd === 'php -v') return out(`PHP ${a.php} (cli)\nZend Engine`)
+    if (cmd === 'php -v') return out(`PHP ${a.software.find((x) => x.name === 'PHP')?.version ?? '?'} (cli)\nZend Engine`)
     if (cmd === 'df -h') return out('Filesystem  Size  Used Avail Use% Mounted on\n' + a.disks.map((d) => `/dev/vda1    80G  ${d.usedPct}%  ${100 - d.usedPct}% ${d.usedPct}% ${d.mount}`).join('\n'))
     if (cmd === 'free -m') return out(`              total   used\nMem:          ${a.memTotalMb}   ${a.memUsedMb}`)
     if (cmd === 'systemctl --failed') return out(a.failedUnits.length ? a.failedUnits.map((u) => `● ${u} failed`).join('\n') : '0 loaded units listed.')

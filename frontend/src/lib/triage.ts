@@ -1,5 +1,5 @@
 import type { Analysis, Server, Session, Task } from '../types'
-import { phpGap } from './php'
+import { versionGap } from './version'
 
 export type Level = 1 | 2 | 3 | 4 | 5
 
@@ -21,13 +21,14 @@ const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? o
 
 /**
  * A ward-board severity for one server, from what the app already knows: the last connect, the last scan,
- * the PHP gap and the open tasks. Every level comes with the reasons that set it.
+ * the tracked software and the open tasks. Every level comes with the reasons that set it.
  * today is YYYY-MM-DD (a seam for tests).
  */
 export function triage(server: Server, a: Analysis | undefined, tasks: Task[], session: Session | undefined, today: string): Triage {
   const f: Finding[] = []
   const add = (level: Level, text: string) => f.push({ level, text })
 
+  if (session?.link?.state === 'lost') add(1, `Connection lost: ${session.link.problem ?? 'the link dropped'}`)
   if (session?.state === 'failed') add(1, `Last connect failed: ${session.error?.problem ?? 'unknown reason'}`)
 
   if (a) {
@@ -44,10 +45,11 @@ export function triage(server: Server, a: Analysis | undefined, tasks: Task[], s
     if (stopped.length) add(4, `${plural(stopped.length, 'container')} stopped: ${stopped.map((c) => c.name).join(', ')}`)
   }
 
-  if (server.php && server.phpTarget) {
-    const gap = phpGap(server.php, server.phpTarget)
-    if (gap === 'branch') add(3, `PHP ${server.php} needs an upgrade to ${server.phpTarget}`)
-    else if (gap === 'patch') add(4, `PHP ${server.php} needs a patch to ${server.phpTarget}`)
+  for (const x of server.software) {
+    if (!x.version || !x.target) continue
+    const gap = versionGap(x.version, x.target)
+    if (gap === 'branch') add(3, `${x.name} ${x.version} needs an upgrade to ${x.target}`)
+    else if (gap === 'patch') add(4, `${x.name} ${x.version} needs a patch to ${x.target}`)
   }
 
   const mine = tasks.filter((t) => t.status !== 'done' && t.serverIds.includes(server.id))

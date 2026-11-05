@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
-import { compareVersions, phpGap } from './php'
+import { compareVersions, versionGap } from './version'
 
-describe('php versions', () => {
+describe('versions', () => {
   it('orders versions numerically, not lexically', () => {
     expect(compareVersions('8.2.9', '8.2.35')).toBeLessThan(0)
     expect(compareVersions('8.4.27', '8.4.27')).toBe(0)
@@ -9,9 +9,9 @@ describe('php versions', () => {
   })
 
   it('classifies the gap to the patched target', () => {
-    expect(phpGap('8.2.35', '8.2.35')).toBe('current')
-    expect(phpGap('8.2.25', '8.2.35')).toBe('patch')
-    expect(phpGap('7.4.27', '8.2.35')).toBe('branch')
-    expect(phpGap('8.5.4', '8.4.27')).toBe('current')
+    expect(versionGap('8.2.35', '8.2.35')).toBe('current')
+    expect(versionGap('8.2.25', '8.2.35')).toBe('patch')
+    expect(versionGap('7.4.27', '8.2.35')).toBe('branch')
+    expect(versionGap('8.5.4', '8.4.27')).toBe('current')
   })
 })

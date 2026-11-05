@@ -23,9 +23,10 @@ const s = (
   vpnId: vpn === 'req' ? null : vpn,
   vpnRequired: vpn === 'req' || undefined,
   os,
-  php,
-  phpTarget,
-  webserver,
+  software: [
+    { name: 'PHP', version: php, target: phpTarget },
+    { name: webserver.split(' ')[0], version: webserver.split(' ')[1], target: '' },
+  ],
   projects,
   mark,
   note,

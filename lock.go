@@ -17,13 +17,15 @@ type LockInfo struct {
 	Locked      bool `json:"locked"`
 	IdleMinutes int  `json:"idleMinutes"`
 	EndOnLock   bool `json:"endOnLock"`
+	// AutoReconnect: a dropped connection is redialled by itself.
+	AutoReconnect bool `json:"autoReconnect"`
 }
 
 func (a *App) LockState() LockInfo {
 	en, lk := a.st.State()
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	return LockInfo{Enabled: en, Locked: lk, IdleMinutes: a.settings.IdleMinutes, EndOnLock: a.settings.EndOnLock}
+	return LockInfo{Enabled: en, Locked: lk, IdleMinutes: a.settings.IdleMinutes, EndOnLock: a.settings.EndOnLock, AutoReconnect: !a.settings.NoReconnect}
 }
 
 func (a *App) isLocked() bool { _, lk := a.st.State(); return lk }
@@ -108,10 +110,20 @@ func (a *App) SetLockSettings(idleMinutes int, endOnLock bool) error {
 		return errors.New("the idle timeout must be between 0 (never) and 1440 minutes")
 	}
 	a.mu.Lock()
-	a.settings = Settings{IdleMinutes: idleMinutes, EndOnLock: endOnLock}
+	a.settings.IdleMinutes, a.settings.EndOnLock = idleMinutes, endOnLock
 	s := a.settings
 	a.mu.Unlock()
 	a.audit("settings.change", "", fmt.Sprintf("idle=%d endOnLock=%t", idleMinutes, endOnLock))
+	return saveSettings(a.settingsPath, s)
+}
+
+// SetAutoReconnect turns the redial of dropped connections on or off.
+func (a *App) SetAutoReconnect(on bool) error {
+	a.mu.Lock()
+	a.settings.NoReconnect = !on
+	s := a.settings
+	a.mu.Unlock()
+	a.audit("settings.change", "", fmt.Sprintf("autoReconnect=%t", on))
 	return saveSettings(a.settingsPath, s)
 }
 

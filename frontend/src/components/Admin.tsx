@@ -1,14 +1,16 @@
-import { useState } from 'react'
+import { useState, type ReactNode } from 'react'
 import { viaLabel } from '../lib/status'
-import type { Server, Vpn, VpnKind } from '../types'
+import type { Login, Server, Vpn, VpnKind } from '../types'
 import { VPN_LABEL } from '../types'
 import { AuditPanel } from './AuditPanel'
-import { SecurityPanel } from './SecurityPanel'
+import { ImportPanel } from './ImportPanel'
+import { LoginsEditor } from './LoginsEditor'
+import { ReconnectSetting, SecurityPanel } from './SecurityPanel'
 import { SystemPanel } from './SystemPanel'
 import type { LockState } from '../lib/lock'
 import { Mark } from './Mark'
 
-type Tab = 'servers' | 'vpns' | 'system' | 'security' | 'audit'
+type Tab = 'servers' | 'vpns' | 'import' | 'system' | 'security' | 'audit'
 
 interface Props {
   servers: Server[]
@@ -19,13 +21,16 @@ interface Props {
   onDeleteServer: (id: string) => Promise<string | null>
   onSaveVpn: (v: Vpn, password: string) => Promise<string | null>
   onDeleteVpn: (id: string) => Promise<string | null>
+  onSaveLogin: (serverId: string, l: Login, secret: string) => Promise<string | null>
+  onDeleteLogin: (serverId: string, id: string) => Promise<string | null>
+  /** The CSV import changed the stored data: load it again. */
+  onImported: () => void
 }
 
 const portOk = (p: number) => Number.isInteger(p) && p >= 1 && p <= 65535
 
 const blankServer = (): Server => ({
-  id: '', name: '', host: '', port: 22, user: '', auth: 'password', vpnId: null, os: '', php: '', phpTarget: '',
-  webserver: '', projects: [], mark: 'hollow',
+  id: '', name: '', host: '', port: 22, user: '', auth: 'password', vpnId: null, os: '', software: [], projects: [], mark: 'hollow',
 })
 const blankVpn = (): Vpn => ({ id: '', name: '', kind: 'forti', gateway: '', port: 10443, user: '' })
 
@@ -40,7 +45,7 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 
 const Note = () => <p className="dim">Passwords go to the OS keyring, never to the data file. This browser demo keeps none.</p>
 
-function ServerForm({ initial, vpns, isNew, onSave, onCancel, onDelete }: { initial: Server; vpns: Vpn[]; isNew: boolean; onSave: Props['onSaveServer']; onCancel: () => void; onDelete: () => Promise<string | null> }) {
+function ServerForm({ initial, vpns, isNew, onSave, onCancel, onDelete, onDuplicate, logins }: { initial: Server; vpns: Vpn[]; isNew: boolean; onSave: Props['onSaveServer']; onCancel: () => void; onDelete: () => Promise<string | null>; onDuplicate: (s: Server) => void; logins?: ReactNode }) {
   const [d, setD] = useState(initial)
   const [pw, setPw] = useState('')
   const [err, setErr] = useState<string | null>(null)
@@ -92,6 +97,10 @@ function ServerForm({ initial, vpns, isNew, onSave, onCancel, onDelete }: { init
         <input type="checkbox" checked={!!d.production} onChange={(e) => set('production', e.target.checked)} />
         <span>Production server: ask before connecting and before a root container shell</span>
       </label>
+      <label style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 12 }}>
+        <input type="checkbox" checked={!!d.autoConnect} onChange={(e) => set('autoConnect', e.target.checked)} />
+        <span>Connect when sshdeck starts (one server at a time; production servers still ask)</span>
+      </label>
       <Field label="Reached through">
         <select
           value={d.vpnId ?? (d.vpnRequired ? '__req' : '')}
@@ -104,15 +113,35 @@ function ServerForm({ initial, vpns, isNew, onSave, onCancel, onDelete }: { init
           <option value="__req">Needs a VPN, not set yet</option>
         </select>
       </Field>
-      <div className="two">
-        <Field label="PHP now"><input value={d.php} placeholder="8.2.25" onChange={(e) => set('php', e.target.value)} /></Field>
-        <Field label="PHP patched target"><input value={d.phpTarget} placeholder="8.2.35" onChange={(e) => set('phpTarget', e.target.value)} /></Field>
-      </div>
+      <Field label="Tracked software">
+        <div style={{ display: 'grid', gap: 6 }}>
+          {d.software.map((x, i) => {
+            const edit = (k: keyof typeof x, v: string) => setD((p) => ({ ...p, software: p.software.map((y, j) => (j === i ? { ...y, [k]: v } : y)) }))
+            return (
+              <div key={i} style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr 1fr auto', gap: 6 }}>
+                <input aria-label="Software name" value={x.name} placeholder="PHP" onChange={(e) => edit('name', e.target.value)} />
+                <input aria-label={`${x.name || 'Software'} version now`} value={x.version} placeholder="now 8.2.25" onChange={(e) => edit('version', e.target.value)} />
+                <input aria-label={`${x.name || 'Software'} target version`} value={x.target} placeholder="target 8.2.35" onChange={(e) => edit('target', e.target.value)} />
+                <button className="btn" type="button" aria-label={`Remove ${x.name || 'software'}`} onClick={() => setD((p) => ({ ...p, software: p.software.filter((_, j) => j !== i) }))}>
+                  Remove
+                </button>
+              </div>
+            )
+          })}
+          <div>
+            <button className="btn" type="button" onClick={() => setD((p) => ({ ...p, software: [...p.software, { name: '', version: '', target: '' }] }))}>
+              Add software
+            </button>
+          </div>
+        </div>
+      </Field>
+      {logins}
       <Note />
       {err && <p className="bad" role="alert">{err}</p>}
       <div className="actions">
         <button className="btn solid" type="submit">{isNew ? 'Add server' : 'Save changes'}</button>
         <button className="btn" type="button" onClick={onCancel}>Cancel</button>
+        {!isNew && <button className="btn" type="button" onClick={() => onDuplicate(d)} title="Start a new server with these settings. The password and other logins are not copied.">Duplicate</button>}
         {!isNew &&
           (confirm ? (
             <>
@@ -187,11 +216,12 @@ function VpnForm({ initial, isNew, onSave, onCancel, onDelete }: { initial: Vpn;
 }
 
 /** Set everything up here: servers, VPN profiles and their credentials. */
-export function Admin({ servers, vpns, lock, onLockChange, onSaveServer, onDeleteServer, onSaveVpn, onDeleteVpn }: Props) {
+export function Admin({ servers, vpns, lock, onLockChange, onSaveServer, onDeleteServer, onSaveVpn, onDeleteVpn, onSaveLogin, onDeleteLogin, onImported }: Props) {
   const [tab, setTab] = useState<Tab>('servers')
   const [editing, setEditing] = useState<string | null>(null) // id, 'new', or null
+  const [copyOf, setCopyOf] = useState<Server | null>(null) // a new server starts from this one
 
-  const switchTab = (t: Tab) => (setTab(t), setEditing(null))
+  const switchTab = (t: Tab) => (setTab(t), setEditing(null), setCopyOf(null))
   const server = servers.find((s) => s.id === editing)
   const vpn = vpns.find((v) => v.id === editing)
 
@@ -201,14 +231,21 @@ export function Admin({ servers, vpns, lock, onLockChange, onSaveServer, onDelet
         <strong>Setup</strong>
         <button className="btn" aria-pressed={tab === 'servers'} onClick={() => switchTab('servers')}>Servers · {servers.length}</button>
         <button className="btn" aria-pressed={tab === 'vpns'} onClick={() => switchTab('vpns')}>VPN profiles · {vpns.length}</button>
+        <button className="btn" aria-pressed={tab === 'import'} onClick={() => switchTab('import')}>Import</button>
         <button className="btn" aria-pressed={tab === 'system'} onClick={() => switchTab('system')}>System</button>
         <button className="btn" aria-pressed={tab === 'security'} onClick={() => switchTab('security')}>Security</button>
         <button className="btn" aria-pressed={tab === 'audit'} onClick={() => switchTab('audit')}>Audit</button>
-        {(tab === 'servers' || tab === 'vpns') && <button className="btn" style={{ marginLeft: 'auto' }} onClick={() => setEditing('new')}>Add {tab === 'servers' ? 'server' : 'VPN profile'}</button>}
+        {(tab === 'servers' || tab === 'vpns') && <button className="btn" style={{ marginLeft: 'auto' }} onClick={() => (setCopyOf(null), setEditing('new'))}>Add {tab === 'servers' ? 'server' : 'VPN profile'}</button>}
       </div>
 
+      {tab === 'import' && <ImportPanel onImported={onImported} />}
       {tab === 'system' && <SystemPanel />}
-      {tab === 'security' && <SecurityPanel lock={lock} onChange={onLockChange} />}
+      {tab === 'security' && (
+        <>
+          <ReconnectSetting lock={lock} onChange={onLockChange} />
+          <SecurityPanel lock={lock} onChange={onLockChange} />
+        </>
+      )}
       {tab === 'audit' && <AuditPanel />}
       <div className="admin-body" hidden={tab !== 'servers' && tab !== 'vpns'}>
         <div className="admin-list">
@@ -252,9 +289,11 @@ export function Admin({ servers, vpns, lock, onLockChange, onSaveServer, onDelet
         {tab === 'servers' && editing && (editing === 'new' || server) && (
           <ServerForm
             key={editing}
-            initial={editing === 'new' ? blankServer() : server!}
+            initial={editing === 'new' ? (copyOf ?? blankServer()) : server!}
+            onDuplicate={(s) => (setCopyOf({ ...s, id: '', name: `${s.name} copy`, autoConnect: false, logins: undefined }), setEditing('new'))}
             vpns={vpns}
             isNew={editing === 'new'}
+            logins={editing !== 'new' && <LoginsEditor logins={server?.logins ?? []} onSave={(l, pw) => onSaveLogin(editing, l, pw)} onDelete={(id) => onDeleteLogin(editing, id)} />}
             onSave={async (s, pw) => { const m = await onSaveServer(s, pw); if (!m) setEditing(null); return m }}
             onCancel={() => setEditing(null)}
             onDelete={async () => {

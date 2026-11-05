@@ -36,12 +36,14 @@ tmpfs           797M  1.1M  796M   1% /run
 tmpfs           3.9G     0  3.9G   0% /dev/shm
 /dev/vdb1       100G   94G  6.0G  94% /var
 `,
-	CmdPHP: `PHP 8.2.25 (cli) (built: Oct 29 2024 10:00:00) (NTS)
+	"php -v": `PHP 8.2.25 (cli) (built: Oct 29 2024 10:00:00) (NTS)
 Copyright (c) The PHP Group
 Zend Engine v4.2.25, Copyright (c) Zend Technologies
 `,
-	CmdWeb: "nginx version: nginx/1.18.0 (Ubuntu)\n",
-	CmdDB:  "mysql  Ver 8.0.36-0ubuntu0.22.04.1 for Linux on x86_64 ((Ubuntu))\n",
+	CmdWeb:                   "nginx version: nginx/1.18.0 (Ubuntu)\n",
+	"mysql --version":        "mysql  Ver 8.0.36-0ubuntu0.22.04.1 for Linux on x86_64 ((Ubuntu))\n",
+	"node --version":         "v18.19.1\n",
+	"redis-server --version": "Redis server v=7.0.15 sha=00000000:0 malloc=jemalloc-5.3.0 bits=64\n",
 	CmdFailed: `php8.2-fpm.service loaded failed failed The PHP 8.2 FastCGI Process Manager
 supervisor-queue.service loaded failed failed Queue workers
 `,
@@ -69,12 +71,12 @@ Swap:          2047         312        1735
 devtmpfs        1.9G     0  1.9G   0% /dev
 /dev/sda3        40G   31G  9.0G  78% /
 `,
-	CmdPHP: `PHP 7.4.27 (cli) (built: Dec 17 2021 12:00:00) ( NTS )
+	"php -v": `PHP 7.4.27 (cli) (built: Dec 17 2021 12:00:00) ( NTS )
 Copyright (c) The PHP Group
 `,
-	CmdWeb:    "Server version: Apache/2.4.6 (CentOS)\nServer built:   Nov 16 2023\n",
-	CmdDB:     "mysql  Ver 15.1 Distrib 10.6.16-MariaDB, for Linux (x86_64) using readline 5.1\n",
-	CmdFailed: "",
+	CmdWeb:            "Server version: Apache/2.4.6 (CentOS)\nServer built:   Nov 16 2023\n",
+	"mysql --version": "mysql  Ver 15.1 Distrib 10.6.16-MariaDB, for Linux (x86_64) using readline 5.1\n",
+	CmdFailed:         "",
 }
 
 func TestUbuntuWithDocker(t *testing.T) {
@@ -85,8 +87,8 @@ func TestUbuntuWithDocker(t *testing.T) {
 	want := Report{
 		OS: "Ubuntu 22.04.4 LTS", Kernel: "5.15.0-107-generic", Uptime: "up 3 weeks, 2 days, 4 hours",
 		CPU: 4, MemTotalMB: 7961, MemUsedMB: 2600,
-		Disks: []Disk{{"/", 29}, {"/var", 94}},
-		PHP:   "8.2.25", WebServer: "Nginx 1.18.0", DB: "MySQL 8.0.36",
+		Disks:       []Disk{{"/", 29}, {"/var", 94}},
+		Software:    []Found{{"PHP", "8.2.25"}, {"Nginx", "1.18.0"}, {"MySQL", "8.0.36"}, {"Redis", "7.0.15"}, {"Node", "18.19.1"}},
 		FailedUnits: []string{"php8.2-fpm.service", "supervisor-queue.service"},
 		Containers: []Container{
 			{"app", "php:8.2-fpm", "running", "9000/tcp"},
@@ -105,7 +107,7 @@ func TestCentOSWithoutDocker(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.OS != "CentOS Linux 7 (Core)" || got.PHP != "7.4.27" || got.WebServer != "Apache 2.4.6" || got.DB != "MariaDB 10.6.16" {
+	if got.OS != "CentOS Linux 7 (Core)" || !reflect.DeepEqual(got.Software, []Found{{"PHP", "7.4.27"}, {"Apache", "2.4.6"}, {"MariaDB", "10.6.16"}}) {
 		t.Fatalf("got %+v", got)
 	}
 	if got.Containers != nil {
@@ -136,7 +138,7 @@ func TestMissingToolsLeaveFieldsEmpty(t *testing.T) {
 	if err != nil {
 		t.Fatalf("a server without PHP or a database is not an error: %v", err)
 	}
-	if got.OS != "Ubuntu 22.04.4 LTS" || got.Kernel != "6.8.0-45-generic" || got.PHP != "" || got.DB != "" || got.WebServer != "" {
+	if got.OS != "Ubuntu 22.04.4 LTS" || got.Kernel != "6.8.0-45-generic" || len(got.Software) != 0 {
 		t.Fatalf("got %+v", got)
 	}
 }
@@ -155,7 +157,10 @@ func TestOnlyReadOnlyCommandsAreRun(t *testing.T) {
 		t.Fatal(err)
 	}
 	allowed := map[string]bool{CmdOSRelease: true, CmdKernel: true, CmdUptime: true, CmdCPU: true, CmdMem: true, CmdDisk: true,
-		CmdPHP: true, CmdWeb: true, CmdDB: true, CmdFailed: true, CmdDocker: true}
+		CmdFailed: true, CmdDocker: true}
+	for _, d := range detectors {
+		allowed[d.cmd] = true
+	}
 	for _, c := range ran {
 		if !allowed[c] {
 			t.Errorf("ran %q, which is not in the read-only command list", c)

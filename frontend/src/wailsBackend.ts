@@ -1,7 +1,7 @@
 import * as App from '../wailsjs/go/main/App'
 import { EventsOn } from '../wailsjs/runtime/runtime'
 import { ConnectError, type Backend } from './api'
-import type { Analysis, Step } from './types'
+import type { Analysis, Link, Step } from './types'
 
 const fromBase64 = (b64: string) => Uint8Array.from(atob(b64), (c) => c.charCodeAt(0))
 
@@ -18,6 +18,7 @@ export const wailsBackend: Backend = {
   },
   confirmManualVpn: (id) => void App.ConfirmManualVPN(id),
   disconnect: (id) => void App.Disconnect(id),
+  onLink: (id, cb) => EventsOn(`link:${id}`, (l: Link) => cb(l)),
 
   async analyze(server) {
     const r = await App.Analyze(server.id)

@@ -68,6 +68,11 @@ func (s *Store) EnableLock(vaultPath, pass string) (leftover []string, err error
 		if err := collect("server/" + sv.ID); err != nil {
 			return nil, err
 		}
+		for _, l := range sv.Logins {
+			if err := collect("login/" + sv.ID + "/" + l.ID); err != nil {
+				return nil, err
+			}
+		}
 	}
 	for _, v := range s.d.VPNs {
 		if err := collect("vpn/" + v.ID); err != nil {

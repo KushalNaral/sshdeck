@@ -28,8 +28,13 @@ export function Palette({ servers, vpns, sessions, onPick, onClose }: Props) {
 
   const key = (e: React.KeyboardEvent) => {
     if (e.key === 'Escape') onClose()
-    else if (e.key === 'ArrowDown') (e.preventDefault(), setI((v) => Math.min(v + 1, hits.length - 1)))
-    else if (e.key === 'ArrowUp') (e.preventDefault(), setI((v) => Math.max(v - 1, 0)))
+    else if (e.key === 'ArrowDown') {
+      e.preventDefault()
+      setI((v) => Math.min(v + 1, hits.length - 1))
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault()
+      setI((v) => Math.max(v - 1, 0))
+    }
     else if (e.key === 'Enter' && hits[i]) onPick(hits[i].s.id, !e.shiftKey)
   }
 

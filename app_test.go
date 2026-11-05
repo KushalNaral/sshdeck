@@ -31,12 +31,14 @@ type fakeVPN struct {
 	up   []string
 	down []string
 	err  error
+	dead bool // Status reports Down until the next Up
 }
 
 func (f *fakeVPN) Up(_ context.Context, v store.VPN, _ string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.up = append(f.up, v.ID)
+	f.dead = false
 	return f.err
 }
 func (f *fakeVPN) Down(id string) error {
@@ -45,7 +47,14 @@ func (f *fakeVPN) Down(id string) error {
 	f.down = append(f.down, id)
 	return nil
 }
-func (f *fakeVPN) Status(string) vpn.State { return vpn.Up }
+func (f *fakeVPN) Status(string) vpn.State {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.dead {
+		return vpn.Down
+	}
+	return vpn.Up
+}
 
 type fakeShell struct {
 	out    chan []byte
@@ -84,6 +93,7 @@ type events struct {
 	mu   sync.Mutex
 	list []string
 	last map[string]any
+	all  map[string][]any
 }
 
 func (e *events) emit(name string, data ...any) {
@@ -95,6 +105,10 @@ func (e *events) emit(name string, data ...any) {
 	}
 	if len(data) > 0 {
 		e.last[name] = data[0]
+		if e.all == nil {
+			e.all = map[string][]any{}
+		}
+		e.all[name] = append(e.all[name], data[0])
 	}
 }
 func (e *events) get(name string) any {

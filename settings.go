@@ -9,6 +9,9 @@ import (
 type Settings struct {
 	IdleMinutes int  `json:"idleMinutes"` // lock after this many idle minutes; 0 means never
 	EndOnLock   bool `json:"endOnLock"`   // locking also ends open shells and VPNs
+	// NoReconnect turns off redialling a dropped connection. It is stored inverted so a settings file written
+	// before this option existed still means "on".
+	NoReconnect bool `json:"noAutoReconnect,omitempty"`
 }
 
 func defaultSettings() Settings { return Settings{IdleMinutes: 15} }

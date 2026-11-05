@@ -1,4 +1,4 @@
-import { phpGap } from './php'
+import { versionGap } from './version'
 import type { Mark, Server, Session, Vpn } from '../types'
 
 export function markFor(server: Server, session?: Session): Mark {
@@ -21,8 +21,9 @@ export function sentence(server: Server, vpns: Vpn[], session?: Session): string
   if (session?.state === 'live') return `Connected as ${server.user}@${server.host}`
   if (session?.state === 'connecting') return 'Connecting…'
   if (session?.state === 'failed') return session.error?.problem ?? 'Connection failed'
-  const gap = phpGap(server.php, server.phpTarget)
-  const php = !server.php ? 'PHP version unknown' : gap === 'current' ? `PHP ${server.php} is current` : `PHP ${server.php} → ${server.phpTarget}`
+  const tracked = server.software.filter((x) => x.version && x.target)
+  const behind = tracked.filter((x) => versionGap(x.version, x.target) !== 'current').length
+  const php = !tracked.length ? 'No software tracked' : behind ? `${behind} of ${tracked.length} tracked behind` : 'Tracked software current'
   const n = server.projects.length
   const via = vpnOf(server, vpns) || server.vpnRequired ? ` · via ${viaLabel(server, vpns)}` : ''
   return `${php} · ${n} project${n === 1 ? '' : 's'}${via}`

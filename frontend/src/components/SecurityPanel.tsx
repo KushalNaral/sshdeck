@@ -168,3 +168,27 @@ export function SecurityPanel({ lock, onChange }: Props) {
     </div>
   )
 }
+
+/** Whether a dropped connection is redialled by itself (a few tries, then it says so). */
+export function ReconnectSetting({ lock, onChange }: Props) {
+  const [err, setErr] = useState('')
+  const set = async (on: boolean) => {
+    setErr('')
+    try {
+      await lockApi.autoReconnect(on)
+      onChange(await lockApi.state())
+    } catch (e) {
+      setErr(messageOf(e))
+    }
+  }
+  return (
+    <div className="admin-form" style={{ borderLeft: 0, maxWidth: 560 }}>
+      <h2 className="name">Connection</h2>
+      <label style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+        <input type="checkbox" checked={lock.autoReconnect} onChange={(e) => void set(e.target.checked)} />
+        <span>Reconnect by itself when a connection drops (five tries; a refused login is never retried)</span>
+      </label>
+      {err && <p className="bad" role="alert">{err}</p>}
+    </div>
+  )
+}

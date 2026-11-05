@@ -19,9 +19,7 @@ const (
 	CmdCPU       = "nproc"
 	CmdMem       = "free -m"
 	CmdDisk      = "df -hP"
-	CmdPHP       = "php -v"
 	CmdWeb       = "nginx -v 2>&1 || apache2 -v 2>&1 || httpd -v 2>&1"
-	CmdDB        = "mysql --version"
 	CmdFailed    = "systemctl --failed --no-legend --plain"
 	CmdDocker    = "docker ps -a --format '{{.Names}}|{{.Image}}|{{.Status}}|{{.Ports}}'"
 )
@@ -29,6 +27,12 @@ const (
 type Disk struct {
 	Mount   string `json:"mount"`
 	UsedPct int    `json:"usedPct"`
+}
+
+// Found is one piece of software the scan found on the server.
+type Found struct {
+	Name    string `json:"name"`
+	Version string `json:"version"`
 }
 
 type Container struct {
@@ -46,10 +50,8 @@ type Report struct {
 	CPU         int         `json:"cpu"`
 	MemTotalMB  int         `json:"memTotalMb"`
 	MemUsedMB   int         `json:"memUsedMb"`
-	Disks       []Disk      `json:"disks"`     // real filesystems only (source starts with /dev/), not tmpfs
-	PHP         string      `json:"php"`       // "8.2.25"
-	WebServer   string      `json:"webserver"` // "Nginx 1.18.0" or "Apache 2.4.6"
-	DB          string      `json:"db"`        // "MySQL 8.0.36" or "MariaDB 10.6.16"
+	Disks       []Disk      `json:"disks"`    // real filesystems only (source starts with /dev/), not tmpfs
+	Software    []Found     `json:"software"` // versions of the tools found, see detectors
 	FailedUnits []string    `json:"failedUnits"`
 	Containers  []Container `json:"containers"` // nil (null) when docker is not installed
 }
@@ -104,21 +106,23 @@ func Analyze(ctx context.Context, run Run) (Report, error) {
 			}
 		}
 	}
-	if o, ok := get(CmdPHP); ok {
-		if f := strings.Fields(o); len(f) > 1 && f[0] == "PHP" {
-			r.PHP = f[1]
+	r.Software = []Found{}
+	seen := map[string]bool{} // a command whose output already matched (mysql --version is MariaDB or MySQL, not both)
+	for _, d := range detectors {
+		if seen[d.cmd] {
+			continue
 		}
-	}
-	if o, ok := get(CmdWeb); ok {
-		if m := webRe.FindStringSubmatch(o); m != nil {
-			r.WebServer = strings.ToUpper(m[1][:1]) + strings.ToLower(m[1][1:]) + " " + m[2]
+		o, ok := get(d.cmd)
+		if !ok {
+			continue
 		}
-	}
-	if o, ok := get(CmdDB); ok {
-		if m := mariaRe.FindStringSubmatch(o); m != nil {
-			r.DB = "MariaDB " + m[1]
-		} else if m := mysqlRe.FindStringSubmatch(o); m != nil {
-			r.DB = "MySQL " + m[1]
+		if m := d.re.FindStringSubmatch(o); m != nil {
+			seen[d.cmd] = true
+			name, ver := d.name, m[1]
+			if name == "" { // the pattern captured the name too
+				name, ver = strings.ToUpper(m[1][:1])+strings.ToLower(m[1][1:]), m[2]
+			}
+			r.Software = append(r.Software, Found{name, ver})
 		}
 	}
 	if o, _ := get(CmdFailed); o != "" {
@@ -146,11 +150,26 @@ func Analyze(ctx context.Context, run Run) (Report, error) {
 	return r, nil
 }
 
-var (
-	webRe   = regexp.MustCompile(`(?i)\b(nginx|apache)/(\d+(?:\.\d+)*)`)
-	mariaRe = regexp.MustCompile(`(\d+(?:\.\d+)*)-MariaDB`)
-	mysqlRe = regexp.MustCompile(`Ver (\d+(?:\.\d+)*)`)
-)
+const ver = `(\d+(?:\.\d+)*)`
+
+// detectors are the read-only commands that tell which software a server runs. All of them only print a version.
+// An empty name means the pattern captures the name (group 1) and the version (group 2).
+var detectors = []struct {
+	name, cmd string
+	re        *regexp.Regexp
+}{
+	{"PHP", "php -v", regexp.MustCompile(`PHP ` + ver)},
+	{"", CmdWeb, regexp.MustCompile(`(?i)\b(nginx|apache)/` + ver)},
+	{"MariaDB", "mysql --version", regexp.MustCompile(ver + `-MariaDB`)},
+	{"MySQL", "mysql --version", regexp.MustCompile(`Ver ` + ver)},
+	{"PostgreSQL", "psql --version", regexp.MustCompile(`PostgreSQL\) ` + ver)},
+	{"Redis", "redis-server --version", regexp.MustCompile(`v=` + ver)},
+	{"Node", "node --version", regexp.MustCompile(`v` + ver)},
+	{"Python", "python3 --version", regexp.MustCompile(`Python ` + ver)},
+	{"Composer", "composer --version 2>&1", regexp.MustCompile(`Composer version ` + ver)},
+	{"Java", "java -version 2>&1", regexp.MustCompile(`version "` + ver)},
+	{"Docker", "docker --version", regexp.MustCompile(`Docker version ` + ver)},
+}
 
 // containerState maps docker's free-text status ("Up 3 days", "Restarting (1) 5 seconds ago") to three states.
 func containerState(s string) string {

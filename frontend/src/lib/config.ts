@@ -1,6 +1,6 @@
 import * as App from '../../wailsjs/go/main/App'
 import { SERVERS, VPNS } from '../data'
-import type { Server, Task, Vpn } from '../types'
+import type { Login, Server, Task, Vpn } from '../types'
 
 export interface Config {
   servers: Server[]
@@ -17,6 +17,12 @@ export interface ConfigStore {
   deleteVpn(id: string): Promise<void>
   saveTask(t: Task): Promise<Task>
   deleteTask(id: string): Promise<void>
+  saveLogin(serverId: string, l: Login, secret: string): Promise<Login>
+  deleteLogin(serverId: string, id: string): Promise<void>
+  /** Puts the user name or the secret on the clipboard (the secret clears itself). */
+  copyLogin(serverId: string, id: string, field: 'user' | 'secret'): Promise<void>
+  /** Puts `ssh -p PORT user@host` on the clipboard. It holds no secret. */
+  copySSH(serverId: string): Promise<void>
 }
 
 /** Wails rejects with a plain string; make every failure a readable message. */
@@ -27,9 +33,8 @@ const fromGoServer = (g: any): Server => ({
   ...g,
   vpnId: g.vpnId || null,
   os: g.os ?? '',
-  php: g.php ?? '',
-  phpTarget: g.phpTarget ?? '',
-  webserver: g.webserver ?? '',
+  logins: g.logins ?? [],
+  software: (g.software ?? []).map((x: any) => ({ name: x.name, version: x.version ?? '', target: x.target ?? '' })),
   projects: g.projects ?? [],
   mark: g.vpnId || g.vpnRequired ? 'hollow' : 'filled',
 })
@@ -52,6 +57,12 @@ const wailsStore: ConfigStore = {
     return (await App.SaveTask(t as any)) as Task
   },
   deleteTask: (id) => App.DeleteTask(id),
+  async saveLogin(sid, l, pw) {
+    return (await App.SaveLogin(sid, l as any, pw)) as Login
+  },
+  deleteLogin: (sid, id) => App.DeleteLogin(sid, id),
+  copyLogin: (sid, id, field) => App.CopyLogin(sid, id, field),
+  copySSH: (sid) => App.CopySSHCommand(sid),
 }
 
 // Browser-only dev mode: demo data kept in localStorage, passwords discarded.
@@ -70,14 +81,14 @@ const localStore: ConfigStore = (() => {
     async load() {
       try {
         const c = JSON.parse(localStorage.getItem(KEY) ?? 'null')
-        if (Array.isArray(c?.servers) && Array.isArray(c?.vpns)) return (cfg = { tasks: [], ...c })
+        if (Array.isArray(c?.servers) && Array.isArray(c?.vpns)) return (cfg = { tasks: [], ...c, servers: c.servers.map((s: any) => ({ ...s, software: s.software ?? [] })) }) // older saves had no software
       } catch {
         /* fall through to demo data */
       }
       return (cfg = { servers: SERVERS, vpns: VPNS, tasks: [] })
     },
     async saveServer(s) {
-      s = { ...s, id: s.id || `s-${Date.now().toString(36)}` }
+      s = { ...s, id: s.id || `s-${Date.now().toString(36)}`, logins: cfg!.servers.find((x) => x.id === s.id)?.logins }
       cfg = { ...cfg!, servers: upsert(cfg!.servers, s) }
       persist()
       return s
@@ -106,6 +117,25 @@ const localStore: ConfigStore = (() => {
     async deleteTask(id) {
       cfg = { ...cfg!, tasks: cfg!.tasks.filter((x) => x.id !== id) }
       persist()
+    },
+    async saveLogin(sid, l) {
+      l = { ...l, id: l.id || `l-${Date.now().toString(36)}` }
+      cfg = { ...cfg!, servers: cfg!.servers.map((x) => (x.id === sid ? { ...x, logins: upsert(x.logins ?? [], l) } : x)) }
+      persist()
+      return l
+    },
+    async deleteLogin(sid, id) {
+      cfg = { ...cfg!, servers: cfg!.servers.map((x) => (x.id === sid ? { ...x, logins: (x.logins ?? []).filter((y) => y.id !== id) } : x)) }
+      persist()
+    },
+    async copySSH(sid) {
+      const x = cfg!.servers.find((y) => y.id === sid)
+      if (x) await navigator.clipboard?.writeText(`ssh${x.port === 22 ? '' : ` -p ${x.port}`} ${x.user}@${x.host}`)
+    },
+    async copyLogin(sid, id, field) {
+      if (field === 'secret') throw new Error('This browser demo keeps no passwords.')
+      const l = cfg!.servers.find((x) => x.id === sid)?.logins?.find((y) => y.id === id)
+      await navigator.clipboard?.writeText(l?.user ?? '')
     },
   }
 })()

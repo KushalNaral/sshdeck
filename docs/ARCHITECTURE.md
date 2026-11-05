@@ -64,7 +64,7 @@ are tested without a network or a window.
 ~/.config/sshdeck/settings.json lock timeout, end-on-lock   mode 0600, no secrets
 ~/.config/sshdeck/audit.log    audit trail                  mode 0600, hash chained
 ~/.config/sshdeck/known_hosts  SSH host keys (first use)    mode 0600
-OS keyring, service "sshdeck"  server/<id>, vpn/<id>        passwords
+OS keyring, service "sshdeck"  server/<id>, vpn/<id>, login/<server>/<id>   passwords
 $XDG_RUNTIME_DIR/sshdeck-vpn-*.conf  openfortivpn config    0600, deleted when the attempt ends
 ```
 
@@ -73,6 +73,18 @@ $XDG_RUNTIME_DIR/sshdeck-vpn-*.conf  openfortivpn config    0600, deleted when t
 - A blank password on save means "keep the stored one". Deleting a VPN that servers still use is refused
   (`VPNInUseError`).
 - IDs are slugs plus random bytes, or any stable string the caller supplies. Re-saving the same ID replaces it.
+- A server tracks `software` (name, version now, target) and has other `logins` (database, cPanel, RDP...). Login
+  secrets are stored like passwords, deleted with the login or server, and carried by the vault migration. They leave
+  Go only through `CopyLogin`, which writes the clipboard from Go and wipes it after 30 s unless something else was
+  copied since. The audit trail records the copy, never the value. `SaveServer` ignores incoming logins: they change
+  only through `SaveLogin` and `DeleteLogin`.
+- **Import and export** (`importer.go`, `internal/importer/csv.go`): one CSV with a `type` column (vpn, server,
+  login). `PickImport` parses the file in Go and returns a preview without passwords; `ApplyImport` saves the picked
+  rows, VPNs first, then servers, then logins. Same name means update, and a blank password cell keeps the stored
+  secret. Export writes the same format with the password column empty (mode 0600).
+- `Server.AutoConnect` ("connect when sshdeck starts"): after unlock `App.tsx` connects those servers once per launch,
+  one at a time, production ones last and each behind its confirmation, so admin-password prompts never stack.
+- The scan fills `Report.Software` from a table of read-only version commands (`probe.detectors`).
 - Go uses `vpnId: ""` for "direct"; the UI uses `null`. The mapping lives in `frontend/src/lib/config.ts`.
 
 ## 4. Connect flow
@@ -111,7 +123,14 @@ sequenceDiagram
 
 A connected server has **one SSH connection** (`sshx.Dial`) that every tab and the analysis share; each tab is a
 separate PTY channel on it. Tab 1 is created by `Connect`; other tabs are created when the UI first attaches to
-them. If the link drops (keepalive fails or the server closes it), the tabs end and the next tab or Reconnect logs
+them. If the link drops (keepalive fails or the server closes it), a watcher (`reconnect.go`) redials by itself:
+five attempts at 2, 4, 8, 16 and 30 s, restarting the VPN first when it is down (Hillstone is manual and is skipped).
+A VPN tunnel that dies first is noticed too: for a background client (`gpclient`) the manager records the
+interface its tunnel added (`tun0`) and `Status` reports Down once it disappears; every 5 s each connection checks
+this and ends its SSH link, which starts the same reconnect. If no new interface appears, the client is trusted.
+A refused login is never retried, because that can lock the account. Progress goes to the UI as `link:<serverId>`
+events (reconnecting, live, lost); ended tabs restart on `live`. The setting `noAutoReconnect` in `settings.json` turns it
+off. Without the watcher, the tabs end and the next tab or Reconnect logs
 in again on a fresh connection.
 
 - Output: `AttachShell(serverId, tab, cols, rows)` starts a goroutine that forwards the session's output as
@@ -166,6 +185,9 @@ certificate is unique per device, a pinned digest also catches a different devic
 The proper long-term fix is for the gateway's administrator to install a certificate from a public CA, after which
 no pinning is needed. Only pin a digest you have reason to trust.
 
+gpclient refuses to start while an earlier background instance is running (a tunnel that died, or one started by hand).
+When it says so, `vpn.Up` runs `gpclient disconnect` and tries the connect once more.
+
 ## 7. SSH details
 
 - **Auth:** password, a private key file (its passphrase, if any, is the stored secret), or the running
@@ -191,7 +213,7 @@ backend.ts           picks wailsBackend inside the window, mockBackend in a plai
 lib/config.ts        ConfigStore: Go store inside Wails, localStorage demo data otherwise
 components/          Rack, ConnectBar, Connection, TerminalPane/Term, Analysis, TasksBoard, Palette, Admin,
                      SystemPanel, SecurityPanel, AuditPanel, LockScreen, Confirm
-lib/                 config, lock, audit, theme, php, status
+lib/                 config, lock, audit, theme, version, status
 ```
 
 Because `Backend` is an interface, `npm run dev` runs the whole UI in a normal browser against fake data, which is
@@ -211,7 +233,7 @@ due dates), **Admin** (servers, VPN profiles, System, Security, Audit).
 | `store` | Temp directory plus an in-memory `Secrets` |
 | `App` | Fakes for `dial`, `lookPath`, the VPN manager, audit and events; covers steps, Hillstone, shared VPN, cancel, lock and idle, audit, shutdown, container commands, dependencies |
 | `importer` | Parsing helpers |
-| Frontend | `vitest` for pure logic (`lib/php.ts`); the UI is checked by eye in the browser |
+| Frontend | `vitest` for pure logic (`lib/version.ts`); the UI is checked by eye in the browser |
 
 Run everything with `go test -race -tags webkit2_41 ./...`.
 
@@ -268,9 +290,6 @@ memory while in use.
 
 - VPN stop under `pkexec` and the `openfortivpn` config-file flow are unconfirmed on a real gateway beyond what is
   reported above.
-- The importer UI with a review screen is not built; the importer package reads the spreadsheet but seeding is done
-  by a one-off command that is kept out of the repository because it names real clients.
-- Per-server extra credentials (database, Jenkins, cPanel, RDP).
 - `govulncheck` reports one advisory in `golang.org/x/crypto` v0.58.0 that sshdeck does not call; the fix exists only
   on an untagged commit, so upgrade when a release carries it.
 - Organisation mode (central inventory, OIDC, per-user access) is designed in [ORG-MODE.md](ORG-MODE.md), not built.

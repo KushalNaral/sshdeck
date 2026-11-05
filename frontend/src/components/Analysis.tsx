@@ -1,6 +1,6 @@
-import { RefreshCw } from 'lucide-react'
+import { Copy, RefreshCw } from 'lucide-react'
 import { useState, type ReactNode } from 'react'
-import { phpGap } from '../lib/php'
+import { versionGap } from '../lib/version'
 import { LEVEL_NAME, type Triage } from '../lib/triage'
 import type { Analysis as A, ContainerTab, Server } from '../types'
 import { Mark } from './Mark'
@@ -28,15 +28,20 @@ interface Props {
   onRescan: () => void
   /** Open a shell inside a running container. */
   onExec: (c: ContainerTab) => void
+  /** Start tracking a found piece of software, or update the version already tracked. */
+  onTrack: (name: string, version: string) => void
+  /** Copies the ssh command for this server; resolves with an error message or null. */
+  onCopySsh: () => Promise<string | null>
   connection?: ReactNode
+  logins?: ReactNode
 }
 
 /** Read-only picture of the box, laid out like departure columns. */
-export function Analysis({ server, triage, data, scanning, error, connected, onRescan, onExec, connection }: Props) {
-  const gap = phpGap(server.php, server.phpTarget)
+export function Analysis({ server, triage, data, scanning, error, connected, onRescan, onExec, onTrack, onCopySsh, connection, logins }: Props) {
   const [runAs, setRunAs] = useState<'default' | 'root' | 'other'>('root')
   const [other, setOther] = useState('')
   const [sudo, setSudo] = useState(false)
+  const [copied, setCopied] = useState<string | null>(null)
   const user = runAs === 'default' ? '' : runAs === 'root' ? 'root' : other.trim()
   const userOk = runAs !== 'other' || /^[A-Za-z0-9_.][A-Za-z0-9_.:-]*$/.test(user)
   const memPct = data?.memTotalMb ? Math.round((data.memUsedMb / data.memTotalMb) * 100) : 0
@@ -44,6 +49,19 @@ export function Analysis({ server, triage, data, scanning, error, connected, onR
     <aside className="pane analysis" aria-label={`Analysis of ${server.name}`}>
       <div className="sect" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <h2 className="name">{server.name}</h2>
+        <button
+          className="btn"
+          title="Copy the ssh command for this server"
+          onClick={async () => {
+            const m = await onCopySsh()
+            setCopied(m ?? 'Copied')
+            setTimeout(() => setCopied(null), 2000)
+          }}
+          style={{ color: 'var(--ink)', marginLeft: 'auto', marginRight: 6 }}
+        >
+          <Copy size={14} strokeWidth={2} />
+          {copied ?? 'Copy ssh'}
+        </button>
         <button className="btn" onClick={onRescan} disabled={scanning} style={{ color: 'var(--ink)' }}>
           <RefreshCw size={14} strokeWidth={2} />
           {scanning ? 'Scanning' : 'Rescan'}
@@ -51,6 +69,7 @@ export function Analysis({ server, triage, data, scanning, error, connected, onR
       </div>
 
       {connection}
+      {logins}
 
       {triage && (
         <div className="sect">
@@ -71,7 +90,7 @@ export function Analysis({ server, triage, data, scanning, error, connected, onR
       {!data ? (
         <div className="sect dim">
           {scanning ? (
-            'Reading the server: OS, PHP, disks, services, containers.'
+            'Reading the server: OS, software, disks, services, containers.'
           ) : error ? (
             <span className="bad" role="alert">{error}</span>
           ) : connected ? (
@@ -111,21 +130,34 @@ export function Analysis({ server, triage, data, scanning, error, connected, onR
           </div>
 
           <div className="sect">
-            <h3 className="label">Stack</h3>
-            <dl className="cols">
-              <dt>PHP</dt>
-              <dd>
-                <Mark kind={gap === 'current' ? 'confirmed' : gap === 'branch' ? 'struck' : 'hollow'} />
-                <span>
-                  {data.php}
-                  {gap !== 'current' && ` → ${server.phpTarget}`}
-                </span>
-              </dd>
-              <dt>Web</dt>
-              <dd>{data.webserver}</dd>
-              <dt>Database</dt>
-              <dd>{data.db}</dd>
-            </dl>
+            <h3 className="label">Software</h3>
+            {data.software.length === 0 ? (
+              <span className="dim">Nothing recognised on this server.</span>
+            ) : (
+              <dl className="cols">
+                {data.software.map((f) => {
+                  const t = server.software.find((x) => x.name.toLowerCase() === f.name.toLowerCase())
+                  const gap = t?.target ? versionGap(f.version, t.target) : null
+                  return (
+                    <div key={f.name} style={{ display: 'contents' }}>
+                      <dt>{f.name}</dt>
+                      <dd>
+                        {gap && <Mark kind={gap === 'current' ? 'confirmed' : gap === 'branch' ? 'struck' : 'hollow'} />}
+                        <span>
+                          {f.version}
+                          {t && gap && gap !== 'current' && ` → ${t.target}`}
+                        </span>
+                        {(!t || t.version !== f.version) && (
+                          <button className="btn" onClick={() => onTrack(f.name, f.version)} title="Remember this version for this server">
+                            {t ? 'Update' : 'Track'}
+                          </button>
+                        )}
+                      </dd>
+                    </div>
+                  )
+                })}
+              </dl>
+            )}
           </div>
 
           <div className="sect">

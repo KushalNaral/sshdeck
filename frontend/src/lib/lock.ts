@@ -6,6 +6,8 @@ export interface LockState {
   locked: boolean
   idleMinutes: number
   endOnLock: boolean
+  /** A dropped connection is redialled by itself. */
+  autoReconnect: boolean
 }
 
 /** The passphrase lock. Passphrases only ever go one way, into these calls. */
@@ -19,6 +21,7 @@ export interface LockApi {
   disable(pass: string): Promise<void>
   change(oldPass: string, newPass: string): Promise<void>
   settings(idleMinutes: number, endOnLock: boolean): Promise<void>
+  autoReconnect(on: boolean): Promise<void>
   touch(): void
   /** Go locked the app (idle timeout). Returns an unsubscribe function. */
   onLocked(cb: () => void): () => void
@@ -32,13 +35,14 @@ const wailsLock: LockApi = {
   disable: (p) => App.DisableLock(p),
   change: (o, n) => App.ChangePassphrase(o, n),
   settings: (i, e) => App.SetLockSettings(i, e),
+  autoReconnect: (on) => App.SetAutoReconnect(on),
   touch: () => void App.Touch(),
   onLocked: (cb) => EventsOn('app:locked', cb),
 }
 
 // Browser-only dev mode: a pretend lock so the screens can be tried without the desktop app.
 const mockLock: LockApi = (() => {
-  let s: LockState = { enabled: false, locked: false, idleMinutes: 15, endOnLock: false }
+  let s: LockState = { enabled: false, locked: false, idleMinutes: 15, endOnLock: false, autoReconnect: true }
   let pass = ''
   const subs = new Set<() => void>()
   return {
@@ -66,6 +70,7 @@ const mockLock: LockApi = (() => {
       pass = n
     },
     settings: async (i, e) => void (s = { ...s, idleMinutes: i, endOnLock: e }),
+    autoReconnect: async (on) => void (s = { ...s, autoReconnect: on }),
     touch: () => {},
     onLocked: (cb) => (subs.add(cb), () => void subs.delete(cb)),
   }

@@ -13,7 +13,7 @@ export function compareVersions(a: string, b: string): number {
 export type Gap = 'current' | 'patch' | 'branch'
 
 /** current: at/above target; patch: same major.minor, behind; branch: older major.minor (needs an upgrade). */
-export function phpGap(current: string, target: string): Gap {
+export function versionGap(current: string, target: string): Gap {
   if (compareVersions(current, target) >= 0) return 'current'
   const [c, t] = [parts(current), parts(target)]
   return c[0] === t[0] && c[1] === t[1] ? 'patch' : 'branch'

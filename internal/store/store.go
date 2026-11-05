@@ -27,22 +27,120 @@ const (
 )
 
 type Server struct {
-	ID          string   `json:"id"`
-	Name        string   `json:"name"`
-	Host        string   `json:"host"`
-	Port        int      `json:"port"`
-	User        string   `json:"user"`
-	Auth        string   `json:"auth"`              // "password" or "key"
-	KeyPath     string   `json:"keyPath,omitempty"` // key auth: private key file; empty means use ssh-agent. The passphrase, if any, is the stored secret.
-	VPNID       string   `json:"vpnId"`             // empty means direct, unless VPNRequired
-	VPNRequired bool     `json:"vpnRequired,omitempty"`
-	Production  bool     `json:"production,omitempty"` // the UI asks before connecting and before root container shells
-	OS          string   `json:"os,omitempty"`
-	PHP         string   `json:"php,omitempty"`
-	PHPTarget   string   `json:"phpTarget,omitempty"`
-	Webserver   string   `json:"webserver,omitempty"`
-	Projects    []string `json:"projects,omitempty"`
-	Note        string   `json:"note,omitempty"`
+	ID          string     `json:"id"`
+	Name        string     `json:"name"`
+	Host        string     `json:"host"`
+	Port        int        `json:"port"`
+	User        string     `json:"user"`
+	Auth        string     `json:"auth"`              // "password" or "key"
+	KeyPath     string     `json:"keyPath,omitempty"` // key auth: private key file; empty means use ssh-agent. The passphrase, if any, is the stored secret.
+	VPNID       string     `json:"vpnId"`             // empty means direct, unless VPNRequired
+	VPNRequired bool       `json:"vpnRequired,omitempty"`
+	Production  bool       `json:"production,omitempty"`  // the UI asks before connecting and before root container shells
+	AutoConnect bool       `json:"autoConnect,omitempty"` // connect when sshdeck starts, one server at a time
+	OS          string     `json:"os,omitempty"`
+	Logins      []Login    `json:"logins,omitempty"`   // other logins on this server (database, Jenkins, cPanel...); managed with SaveLogin
+	Software    []Software `json:"software,omitempty"` // what is tracked on this server, with the version it should reach
+	Projects    []string   `json:"projects,omitempty"`
+	Note        string     `json:"note,omitempty"`
+}
+
+// Login is another credential that belongs to a server, such as its database or cPanel. The secret is kept like a
+// server password, under the key "login/<serverID>/<loginID>".
+type Login struct {
+	ID      string `json:"id"`
+	Label   string `json:"label"`
+	Kind    string `json:"kind"` // one of loginKinds
+	User    string `json:"user,omitempty"`
+	Address string `json:"address,omitempty"` // host:port or URL; only shown, never connected to
+	Note    string `json:"note,omitempty"`
+}
+
+var loginKinds = map[string]bool{"db": true, "web": true, "cpanel": true, "rdp": true, "other": true}
+
+// Software is one tracked piece of software, such as PHP 8.2.25 with a target of 8.2.35.
+type Software struct {
+	Name    string `json:"name"`
+	Version string `json:"version,omitempty"`
+	Target  string `json:"target,omitempty"`
+}
+
+// UnmarshalJSON reads files written before software tracking, which had php, phpTarget and webserver fields.
+func (s *Server) UnmarshalJSON(b []byte) error {
+	type plain Server
+	var p plain
+	var old struct {
+		PHP       string `json:"php"`
+		PHPTarget string `json:"phpTarget"`
+		Webserver string `json:"webserver"`
+	}
+	if err := json.Unmarshal(b, &p); err != nil {
+		return err
+	}
+	if err := json.Unmarshal(b, &old); err != nil {
+		return err
+	}
+	*s = Server(p)
+	if len(s.Software) == 0 {
+		if old.PHP != "" || old.PHPTarget != "" {
+			s.Software = append(s.Software, Software{"PHP", old.PHP, old.PHPTarget})
+		}
+		if name, ver, _ := strings.Cut(old.Webserver, " "); name != "" {
+			s.Software = append(s.Software, Software{name, ver, ""})
+		}
+	}
+	return nil
+}
+
+// CheckServer is every rule about a server that needs no stored data (whether its VPN exists is the store's business).
+func CheckServer(sv Server) error {
+	switch {
+	case sv.Name == "":
+		return invalid("name is required")
+	case sv.Host == "":
+		return invalid("host is required")
+	case sv.User == "":
+		return invalid("user is required")
+	case checkHost(sv.Host) != nil:
+		return checkHost(sv.Host)
+	case checkUser(sv.User) != nil:
+		return checkUser(sv.User)
+	case hasControl(sv.KeyPath):
+		return invalid("key file path must not contain control characters")
+	case !validPort(sv.Port):
+		return invalid("port must be 1-65535")
+	case sv.Auth != "password" && sv.Auth != "key":
+		return invalid("auth must be password or key")
+	}
+	return checkSoftware(sv.Software)
+}
+
+// CheckLogin is every rule about one of a server's other logins.
+func CheckLogin(l Login) error {
+	switch {
+	case strings.TrimSpace(l.Label) == "":
+		return invalid("login needs a label")
+	case !loginKinds[l.Kind]:
+		return invalid("login kind must be db, web, cpanel, rdp or other")
+	case hasControl(l.Label) || hasControl(l.User) || hasControl(l.Address) || hasControl(l.Kind):
+		return invalid("login fields must not contain control characters")
+	}
+	return nil
+}
+
+func checkSoftware(list []Software) error {
+	if len(list) > 50 {
+		return invalid("at most 50 software entries")
+	}
+	for _, x := range list {
+		switch {
+		case strings.TrimSpace(x.Name) == "":
+			return invalid("software needs a name")
+		case hasControl(x.Name) || hasControl(x.Version) || hasControl(x.Target):
+			return invalid("software must not contain control characters")
+		}
+	}
+	return nil
 }
 
 type VPN struct {
@@ -206,6 +304,23 @@ func checkHost(host string) error {
 	return nil
 }
 
+// ValidateVPN is every rule about a VPN profile that needs no stored data.
+func ValidateVPN(v VPN, password string) error {
+	switch {
+	case v.Name == "":
+		return invalid("name is required")
+	case v.Gateway == "":
+		return invalid("gateway is required")
+	case !validPort(v.Port):
+		return invalid("port must be 1-65535")
+	case v.Kind != Forti && v.Kind != GP && v.Kind != Hillstone:
+		return invalid("unknown VPN client %q", v.Kind)
+	case v.TrustedCert != "" && !certRe.MatchString(v.TrustedCert):
+		return invalid("trusted certificate must be a 64-character sha256 hex digest")
+	}
+	return CheckVPN(v, password)
+}
+
 // CheckVPN validates the fields that reach a root VPN client, and the VPN password (a line break in it
 // could add lines to the client's config file). The vpn package calls it again before starting a client.
 func CheckVPN(v VPN, password string) error {
@@ -245,24 +360,10 @@ func (s *Store) SaveServer(sv Server, password string) (Server, error) {
 	if s.locked {
 		return sv, ErrLocked
 	}
-	switch {
-	case sv.Name == "":
-		return sv, invalid("name is required")
-	case sv.Host == "":
-		return sv, invalid("host is required")
-	case sv.User == "":
-		return sv, invalid("user is required")
-	case checkHost(sv.Host) != nil:
-		return sv, checkHost(sv.Host)
-	case checkUser(sv.User) != nil:
-		return sv, checkUser(sv.User)
-	case hasControl(sv.KeyPath):
-		return sv, invalid("key file path must not contain control characters")
-	case !validPort(sv.Port):
-		return sv, invalid("port must be 1-65535")
-	case sv.Auth != "password" && sv.Auth != "key":
-		return sv, invalid("auth must be password or key")
-	case sv.VPNID != "" && s.vpnIndex(sv.VPNID) < 0:
+	if err := CheckServer(sv); err != nil {
+		return sv, err
+	}
+	if sv.VPNID != "" && s.vpnIndex(sv.VPNID) < 0 {
 		return sv, invalid("unknown VPN %q", sv.VPNID)
 	}
 	if sv.VPNID != "" {
@@ -277,11 +378,75 @@ func (s *Store) SaveServer(sv Server, password string) (Server, error) {
 		}
 	}
 	if i := s.serverIndex(sv.ID); i >= 0 {
+		sv.Logins = s.d.Servers[i].Logins // logins change only through SaveLogin and DeleteLogin
 		s.d.Servers[i] = sv
 	} else {
+		sv.Logins = nil
 		s.d.Servers = append(s.d.Servers, sv)
 	}
 	return sv, s.flush()
+}
+
+// SaveLogin adds or replaces one of a server's other logins. A non-empty secret replaces the stored one.
+func (s *Store) SaveLogin(serverID string, l Login, secret string) (Login, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.locked {
+		return l, ErrLocked
+	}
+	i := s.serverIndex(serverID)
+	switch {
+	case i < 0:
+		return l, ErrNotFound
+	case CheckLogin(l) != nil:
+		return l, CheckLogin(l)
+	case len(s.d.Servers[i].Logins) >= 50 && l.ID == "":
+		return l, invalid("at most 50 logins per server")
+	}
+	if l.ID == "" {
+		l.ID = newID(l.Label)
+	}
+	if secret != "" {
+		if err := s.setSecret("login/"+serverID+"/"+l.ID, secret); err != nil {
+			return l, fmt.Errorf("store secret: %w", err)
+		}
+	}
+	list := s.d.Servers[i].Logins
+	replaced := false
+	for j := range list {
+		if list[j].ID == l.ID {
+			list[j], replaced = l, true
+		}
+	}
+	if !replaced {
+		list = append(list, l)
+	}
+	s.d.Servers[i].Logins = list
+	return l, s.flush()
+}
+
+// DeleteLogin removes a login and its secret.
+func (s *Store) DeleteLogin(serverID, loginID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.locked {
+		return ErrLocked
+	}
+	i := s.serverIndex(serverID)
+	if i < 0 {
+		return ErrNotFound
+	}
+	list := s.d.Servers[i].Logins
+	for j := range list {
+		if list[j].ID == loginID {
+			s.d.Servers[i].Logins = append(list[:j:j], list[j+1:]...)
+			if err := s.delSecret("login/" + serverID + "/" + loginID); err != nil {
+				return err
+			}
+			return s.flush()
+		}
+	}
+	return ErrNotFound
 }
 
 func (s *Store) DeleteServer(id string) error {
@@ -294,7 +459,13 @@ func (s *Store) DeleteServer(id string) error {
 	if i < 0 {
 		return ErrNotFound
 	}
+	logins := s.d.Servers[i].Logins
 	s.d.Servers = append(s.d.Servers[:i], s.d.Servers[i+1:]...)
+	for _, l := range logins {
+		if err := s.delSecret("login/" + id + "/" + l.ID); err != nil {
+			return err
+		}
+	}
 	for j := range s.d.Tasks {
 		s.d.Tasks[j].ServerIDs = without(s.d.Tasks[j].ServerIDs, id)
 	}
@@ -310,19 +481,7 @@ func (s *Store) SaveVPN(v VPN, password string) (VPN, error) {
 	if s.locked {
 		return v, ErrLocked
 	}
-	switch {
-	case v.Name == "":
-		return v, invalid("name is required")
-	case v.Gateway == "":
-		return v, invalid("gateway is required")
-	case !validPort(v.Port):
-		return v, invalid("port must be 1-65535")
-	case v.Kind != Forti && v.Kind != GP && v.Kind != Hillstone:
-		return v, invalid("unknown VPN client %q", v.Kind)
-	case v.TrustedCert != "" && !certRe.MatchString(v.TrustedCert):
-		return v, invalid("trusted certificate must be a 64-character sha256 hex digest")
-	}
-	if err := CheckVPN(v, password); err != nil {
+	if err := ValidateVPN(v, password); err != nil {
 		return v, err
 	}
 	if v.ID == "" {

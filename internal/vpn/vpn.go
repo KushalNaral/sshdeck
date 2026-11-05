@@ -65,6 +65,7 @@ type entry struct {
 	p     Proc
 	state State
 	stop  []string // for clients that leave a background daemon: the command that ends it
+	tun   string   // for a background client: the network interface its tunnel created, so Status can tell when it dies
 }
 
 type manager struct {
@@ -272,7 +273,84 @@ func explain(lines []string) error {
 	return errors.New(strings.Join(errs, "; "))
 }
 
+// netDir lists the machine's network interfaces (a seam for tests). tunWait is how long to look for a new one.
+var (
+	netDir  = "/sys/class/net"
+	tunWait = 3 * time.Second
+)
+
+func interfaces() map[string]bool {
+	out := map[string]bool{}
+	if es, err := os.ReadDir(netDir); err == nil {
+		for _, e := range es {
+			out[e.Name()] = true
+		}
+	}
+	return out
+}
+
+// newTunnel finds the interface that appeared since before: a tunnel device by name, or the only new one.
+// Bridges and the like that come and go (docker) are ignored. It returns "" when nothing suitable shows up.
+func newTunnel(before map[string]bool, wait time.Duration) string {
+	for deadline := time.Now().Add(wait); ; time.Sleep(50 * time.Millisecond) {
+		var fresh []string
+		for n := range interfaces() {
+			if before[n] {
+				continue
+			}
+			for _, p := range []string{"tun", "gpd", "ppp", "utun"} {
+				if strings.HasPrefix(n, p) {
+					return n
+				}
+			}
+			fresh = append(fresh, n)
+		}
+		if len(fresh) == 1 && !strings.HasPrefix(fresh[0], "br-") && !strings.HasPrefix(fresh[0], "veth") && !strings.HasPrefix(fresh[0], "docker") {
+			return fresh[0]
+		}
+		if time.Now().After(deadline) {
+			return ""
+		}
+	}
+}
+
+// tunnelAlive is false once the interface is gone or flagged down. Tunnel devices report "unknown", which is fine.
+func tunnelAlive(name string) bool {
+	if _, err := os.Stat(filepath.Join(netDir, name)); err != nil {
+		return false
+	}
+	b, _ := os.ReadFile(filepath.Join(netDir, name, "operstate"))
+	st := strings.TrimSpace(string(b))
+	return st != "down" && st != "notpresent"
+}
+
+// current is the entry's state, with a dead tunnel counted as Down. m.mu must be held.
+func (e *entry) current() State {
+	if e.state == Up && e.tun != "" && !tunnelAlive(e.tun) {
+		e.state = Down
+	}
+	return e.state
+}
+
+// staleClient is what gpclient says while an earlier background instance (a tunnel that died, or one started by
+// hand) is still running. That instance is stopped and the connect tried once more.
+const staleClient = "Another instance of the client is already running"
+
 func (m *manager) Up(ctx context.Context, v store.VPN, secret string) error {
+	err := m.up(ctx, v, secret)
+	if err == nil || !strings.Contains(err.Error(), staleClient) {
+		return err
+	}
+	_, _, _, stop, cleanup, cerr := command(v, secret)
+	cleanup()
+	if cerr != nil || stop == nil {
+		return err
+	}
+	_ = m.runStop(stop)
+	return m.up(ctx, v, secret)
+}
+
+func (m *manager) up(ctx context.Context, v store.VPN, secret string) error {
 	argv, stdin, ready, stop, cleanup, err := command(v, secret)
 	defer cleanup()
 	if err != nil {
@@ -281,7 +359,7 @@ func (m *manager) Up(ctx context.Context, v store.VPN, secret string) error {
 	e := &entry{state: Connecting, stop: stop}
 	m.mu.Lock()
 	if cur := m.m[v.ID]; cur != nil {
-		switch cur.state {
+		switch cur.current() {
 		case Up:
 			m.mu.Unlock()
 			return nil
@@ -293,6 +371,10 @@ func (m *manager) Up(ctx context.Context, v store.VPN, secret string) error {
 	m.m[v.ID] = e
 	m.mu.Unlock()
 
+	var before map[string]bool
+	if ready == "" { // a background client: its tunnel is found by the interface it adds
+		before = interfaces()
+	}
 	p, err := m.s.Start(ctx, argv, stdin)
 	if err != nil {
 		m.setState(v.ID, e, Failed)
@@ -308,6 +390,10 @@ func (m *manager) Up(ctx context.Context, v store.VPN, secret string) error {
 		case line, ok := <-p.Lines():
 			if !ok {
 				if ready == "" && p.Wait() == nil { // background client: a clean exit is "signed in, tunnel running"
+					tun := newTunnel(before, tunWait)
+					m.mu.Lock()
+					e.tun = tun
+					m.mu.Unlock()
 					m.setState(v.ID, e, Up)
 					return nil
 				}
@@ -347,6 +433,22 @@ func (m *manager) Up(ctx context.Context, v store.VPN, secret string) error {
 	}
 }
 
+// runStop runs the command that ends a background client (for gpclient, "disconnect") and waits for it.
+func (m *manager) runStop(stop []string) error {
+	p, err := m.s.Start(context.Background(), stop, "")
+	if err != nil {
+		return err
+	}
+	go func() {
+		for range p.Lines() {
+		}
+	}()
+	if err := p.Wait(); err != nil {
+		return fmt.Errorf("%s: %w", strings.Join(stop[1:], " "), err)
+	}
+	return nil
+}
+
 func (m *manager) Down(id string) error {
 	m.mu.Lock()
 	e := m.m[id]
@@ -356,16 +458,8 @@ func (m *manager) Down(id string) error {
 	}
 	err := e.p.Stop()
 	if e.stop != nil {
-		if p, serr := m.s.Start(context.Background(), e.stop, ""); serr != nil {
+		if serr := m.runStop(e.stop); serr != nil {
 			err = serr
-		} else {
-			go func() {
-				for range p.Lines() {
-				}
-			}()
-			if werr := p.Wait(); werr != nil {
-				err = fmt.Errorf("%s: %w", strings.Join(e.stop[1:], " "), werr)
-			}
 		}
 	}
 	m.setState(id, e, Down)
@@ -376,7 +470,7 @@ func (m *manager) Status(id string) State {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if e := m.m[id]; e != nil {
-		return e.state
+		return e.current()
 	}
 	return Down
 }

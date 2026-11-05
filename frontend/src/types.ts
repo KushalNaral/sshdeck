@@ -30,13 +30,34 @@ export interface Server {
   vpnRequired?: boolean
   /** Production server: the app asks before connecting and before a root container shell. */
   production?: boolean
+  /** Connect when sshdeck starts. */
+  autoConnect?: boolean
   os: string
-  php: string
-  phpTarget: string
-  webserver: string
+  software: Software[]
+  logins?: Login[]
   projects: string[]
   mark: Exclude<Mark, 'confirmed'>
   note?: string
+}
+
+export type LoginKind = 'db' | 'web' | 'cpanel' | 'rdp' | 'other'
+export const LOGIN_KIND: Record<LoginKind, string> = { db: 'Database', web: 'Web app', cpanel: 'cPanel', rdp: 'RDP', other: 'Other' }
+
+/** Another credential on a server. Its secret is write-only: it never comes back to the UI, only to the clipboard. */
+export interface Login {
+  id: string
+  label: string
+  kind: LoginKind
+  user?: string
+  address?: string
+  note?: string
+}
+
+/** Software tracked on a server: what it runs now and the version it should reach. */
+export interface Software {
+  name: string
+  version: string
+  target: string
 }
 
 export interface Container {
@@ -50,9 +71,8 @@ export interface Analysis {
   os: string
   kernel: string
   uptime: string
-  php: string
-  webserver: string
-  db: string
+  /** Versions found on the server by the scan. */
+  software: { name: string; version: string }[]
   cpu: number
   memUsedMb: number
   memTotalMb: number
@@ -90,6 +110,15 @@ export interface Dep {
   installable: boolean
 }
 
+/** A dropped connection being redialled by the Go side. */
+export interface Link {
+  state: 'reconnecting' | 'live' | 'lost'
+  attempt?: number
+  max?: number
+  problem?: string
+  recovery?: string
+}
+
 export interface Session {
   serverId: string
   state: SessionState
@@ -100,6 +129,7 @@ export interface Session {
   tabInfo?: Record<number, ContainerTab>
   since?: number
   error?: { problem: string; recovery: string }
+  link?: Link
 }
 
 export type Mode = 'firefight' | 'tasks' | 'admin'

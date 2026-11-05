@@ -1415,3 +1415,80 @@ tbody tr:hover td {
     filter: invert(0.85);
   }
 }
+
+/* Other logins: the list in the details pane and the editor in Admin. */
+.logins {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 6px;
+}
+.logins li,
+.login-row {
+  display: flex;
+  align-items: center;
+  gap: var(--u);
+}
+.login-name {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.tag-kind {
+  flex: none;
+  min-width: 68px;
+  padding: 1px 6px;
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  background: var(--nav);
+  color: var(--dim);
+  font-size: var(--t-sm);
+  text-align: center;
+}
+.logins-editor {
+  display: grid;
+  gap: var(--u);
+  margin: 0;
+  padding: var(--u) 12px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+}
+.logins-editor legend {
+  padding: 0 6px;
+  color: var(--head);
+  font-weight: 600;
+}
+.login-draft {
+  display: grid;
+  gap: var(--u);
+}
+
+.import table {
+  width: 100%;
+}
+.import ul {
+  margin: 4px 0 0;
+  padding-left: 18px;
+}
+
+/* Find in terminal (Ctrl+Shift+F). */
+.term {
+  position: relative;
+}
+.findbar {
+  position: absolute;
+  top: var(--u);
+  right: calc(var(--u) * 2);
+  z-index: 5;
+  display: flex;
+  gap: 4px;
+  padding: 4px;
+  border: 1px solid var(--pane-line);
+  border-radius: var(--r);
+  background: var(--nav);
+  box-shadow: 0 2px 8px rgb(0 0 0 / 0.35);
+}
+.findbar input {
+  width: 200px;
+}

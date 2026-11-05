@@ -41,6 +41,7 @@ type conn struct {
 	vpnID  string
 	client sshx.Client // the one SSH login every tab and the analysis share
 	shells map[int]*shell
+	stop   context.CancelFunc // ends the watcher that redials a dropped link
 }
 
 func fail(problem, recovery string) ConnectResult {
@@ -197,8 +198,11 @@ func (a *App) connect(serverID string) ConnectResult {
 		a.releaseVPN(vp)
 		return cancelled()
 	}
+	wctx, stop := context.WithCancel(a.ctx)
+	c.stop = stop
 	a.conns[serverID] = c
 	a.mu.Unlock()
+	go a.watch(wctx, serverID, c, vp)
 	return ConnectResult{OK: true}
 }
 
@@ -312,6 +316,9 @@ func (a *App) Disconnect(serverID string) {
 	a.mu.Unlock()
 	if c == nil {
 		return
+	}
+	if c.stop != nil {
+		c.stop()
 	}
 	for _, sh := range c.shells {
 		sh.s.Close()

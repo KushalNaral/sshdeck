@@ -1,9 +1,11 @@
 package store
 
 import (
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -251,5 +253,118 @@ func TestProductionFlagRoundTrips(t *testing.T) {
 	other.Name = "Staging"
 	if saved2, _ := s.SaveServer(other, "pw"); saved2.Production {
 		t.Error("a server defaults to not production")
+	}
+}
+
+func TestSoftwareRoundTripsAndIsValidated(t *testing.T) {
+	s, _, _ := open(t)
+	sv := Server{Name: "A", Host: "a.example.com", Port: 22, User: "u", Auth: "password",
+		Software: []Software{{Name: "PHP", Version: "8.2.25", Target: "8.2.35"}, {Name: "Node", Version: "18.19"}}}
+	saved, err := s.SaveServer(sv, "pw")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := s.Servers()[0].Software; len(got) != 2 || got[0].Target != "8.2.35" {
+		t.Fatalf("software = %+v", got)
+	}
+	sv = saved
+	sv.Software = []Software{{Name: ""}}
+	if _, err := s.SaveServer(sv, ""); !errors.Is(err, ErrInvalid) {
+		t.Errorf("empty software name: err = %v, want ErrInvalid", err)
+	}
+	sv.Software = []Software{{Name: "PHP\n", Version: "1"}}
+	if _, err := s.SaveServer(sv, ""); !errors.Is(err, ErrInvalid) {
+		t.Errorf("control character in name: err = %v, want ErrInvalid", err)
+	}
+	sv.Software = make([]Software, 51)
+	for i := range sv.Software {
+		sv.Software[i] = Software{Name: "x"}
+	}
+	if _, err := s.SaveServer(sv, ""); !errors.Is(err, ErrInvalid) {
+		t.Errorf("51 entries: err = %v, want ErrInvalid", err)
+	}
+}
+
+func TestOldPHPAndWebserverFieldsBecomeSoftware(t *testing.T) {
+	var sv Server
+	old := `{"id":"x","name":"X","host":"h","port":22,"user":"u","auth":"password","vpnId":"","php":"8.2.25","phpTarget":"8.2.35","webserver":"Nginx 1.18.0"}`
+	if err := json.Unmarshal([]byte(old), &sv); err != nil {
+		t.Fatal(err)
+	}
+	want := []Software{{"PHP", "8.2.25", "8.2.35"}, {"Nginx", "1.18.0", ""}}
+	if !reflect.DeepEqual(sv.Software, want) {
+		t.Fatalf("software = %+v, want %+v", sv.Software, want)
+	}
+	b, _ := json.Marshal(sv)
+	if strings.Contains(string(b), `"php"`) || strings.Contains(string(b), "webserver") {
+		t.Errorf("old fields written back: %s", b)
+	}
+}
+
+func TestLoginsKeepTheirSecretsOutOfTheFileAndGoWithTheServer(t *testing.T) {
+	s, sec, path := open(t)
+	sv, err := s.SaveServer(good, "ssh-pw")
+	if err != nil {
+		t.Fatal(err)
+	}
+	l, err := s.SaveLogin(sv.ID, Login{Label: "Main DB", Kind: "db", User: "root", Address: "127.0.0.1:3306"}, "db-secret")
+	if err != nil || l.ID == "" {
+		t.Fatalf("save login: %+v %v", l, err)
+	}
+	if pw, err := s.Password("login", sv.ID+"/"+l.ID); err != nil || pw != "db-secret" {
+		t.Fatalf("secret = %q %v", pw, err)
+	}
+	if raw, _ := os.ReadFile(path); strings.Contains(string(raw), "db-secret") || !strings.Contains(string(raw), "Main DB") {
+		t.Errorf("file should hold the label but not the secret: %s", raw)
+	}
+	// An empty secret keeps the stored one; editing the server leaves its logins alone.
+	if _, err := s.SaveLogin(sv.ID, Login{ID: l.ID, Label: "Main DB", Kind: "db", User: "admin"}, ""); err != nil {
+		t.Fatal(err)
+	}
+	if pw, _ := s.Password("login", sv.ID+"/"+l.ID); pw != "db-secret" {
+		t.Errorf("blank secret replaced the stored one: %q", pw)
+	}
+	edited := sv
+	edited.Logins = nil
+	if _, err := s.SaveServer(edited, ""); err != nil {
+		t.Fatal(err)
+	}
+	if got := s.Servers()[0].Logins; len(got) != 1 || got[0].User != "admin" {
+		t.Fatalf("logins after editing the server = %+v", got)
+	}
+	// Deleting the login, and then the server, removes the secrets.
+	if err := s.DeleteLogin(sv.ID, l.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := sec["login/"+sv.ID+"/"+l.ID]; ok {
+		t.Error("login secret survived DeleteLogin")
+	}
+	l2, _ := s.SaveLogin(sv.ID, Login{Label: "cPanel", Kind: "cpanel", User: "c"}, "cp")
+	if err := s.DeleteServer(sv.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := sec["login/"+sv.ID+"/"+l2.ID]; ok {
+		t.Error("login secret survived DeleteServer")
+	}
+}
+
+func TestLoginValidation(t *testing.T) {
+	s, _, _ := open(t)
+	sv, _ := s.SaveServer(good, "pw")
+	for name, l := range map[string]Login{
+		"no label":      {Kind: "db"},
+		"unknown kind":  {Label: "x", Kind: "ftp"},
+		"control chars": {Label: "x\n", Kind: "db"},
+		"control user":  {Label: "x", Kind: "db", User: "a\tb"},
+	} {
+		if _, err := s.SaveLogin(sv.ID, l, "s"); !errors.Is(err, ErrInvalid) {
+			t.Errorf("%s: err = %v, want ErrInvalid", name, err)
+		}
+	}
+	if _, err := s.SaveLogin("nope", Login{Label: "x", Kind: "db"}, "s"); !errors.Is(err, ErrNotFound) {
+		t.Errorf("unknown server: err = %v, want ErrNotFound", err)
+	}
+	if err := s.DeleteLogin(sv.ID, "nope"); !errors.Is(err, ErrNotFound) {
+		t.Errorf("unknown login: err = %v, want ErrNotFound", err)
 	}
 }

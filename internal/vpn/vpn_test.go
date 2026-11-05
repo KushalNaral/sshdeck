@@ -147,6 +147,7 @@ func TestFortiPasswordGoesInAPrivateFileThatIsRemoved(t *testing.T) {
 func init() {
 	lookPath = func(n string) (string, error) { return "/usr/bin/" + n, nil }
 	rootOwned = func(string) error { return nil }
+	tunWait = 20 * time.Millisecond
 }
 
 // withClients pretends only the named programs (and pkexec) are installed.
@@ -489,5 +490,148 @@ func TestSweepRemovesOnlyStaleConfigFiles(t *testing.T) {
 		if _, err := os.Stat(keep); err != nil {
 			t.Errorf("%s must be left alone", keep)
 		}
+	}
+}
+
+// withNet points the interface list at a temp directory the test can add and remove interfaces in.
+func withNet(t *testing.T, names ...string) string {
+	t.Helper()
+	dir := t.TempDir()
+	old := netDir
+	netDir = dir
+	t.Cleanup(func() { netDir = old })
+	for _, n := range names {
+		if err := os.Mkdir(filepath.Join(dir, n), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return dir
+}
+
+// bringsUpTunnel is a background client that creates the interface and then exits cleanly.
+func bringsUpTunnel(dir, iface string) func(*fakeProc) {
+	return func(p *fakeProc) {
+		_ = os.Mkdir(filepath.Join(dir, iface), 0o755)
+		printThenExit(nil, "Sign-in complete")(p)
+	}
+}
+
+func TestBackgroundTunnelIsWatchedByItsInterface(t *testing.T) {
+	withClients(t, "gpclient", "openconnect")
+	dir := withNet(t, "lo", "wlp0s20f3", "docker0")
+	m := New(&fakeStarter{script: bringsUpTunnel(dir, "tun0")})
+	if err := m.Up(ctx(t), gp, "pw"); err != nil {
+		t.Fatal(err)
+	}
+	if m.Status("gov") != Up {
+		t.Fatalf("status %v, want up while tun0 exists", m.Status("gov"))
+	}
+	if err := os.Remove(filepath.Join(dir, "tun0")); err != nil {
+		t.Fatal(err)
+	}
+	if m.Status("gov") != Down {
+		t.Errorf("status %v, want down once tun0 is gone", m.Status("gov"))
+	}
+}
+
+func TestTunnelFlaggedDownCountsAsDown(t *testing.T) {
+	withClients(t, "gpclient", "openconnect")
+	dir := withNet(t, "lo")
+	m := New(&fakeStarter{script: bringsUpTunnel(dir, "tun0")})
+	if err := m.Up(ctx(t), gp, "pw"); err != nil {
+		t.Fatal(err)
+	}
+	// tunnel devices usually say "unknown", which is fine
+	_ = os.WriteFile(filepath.Join(dir, "tun0", "operstate"), []byte("unknown\n"), 0o644)
+	if m.Status("gov") != Up {
+		t.Fatal("operstate unknown must count as up")
+	}
+	_ = os.WriteFile(filepath.Join(dir, "tun0", "operstate"), []byte("down\n"), 0o644)
+	if m.Status("gov") != Down {
+		t.Error("operstate down must count as down")
+	}
+}
+
+func TestOnlyANewInterfaceIsTheTunnelAndNoneMeansTrustTheClient(t *testing.T) {
+	withClients(t, "gpclient", "openconnect")
+	withNet(t, "lo", "tun0") // tun0 already existed: another VPN's, not ours
+	m := New(&fakeStarter{script: printThenExit(nil, "Sign-in complete")})
+	if err := m.Up(ctx(t), gp, "pw"); err != nil {
+		t.Fatal(err)
+	}
+	if m.Status("gov") != Up {
+		t.Errorf("status %v: with no new interface there is nothing to watch, so keep trusting the client", m.Status("gov"))
+	}
+}
+
+func TestDockerBridgeAppearingIsNotTheTunnel(t *testing.T) {
+	withClients(t, "gpclient", "openconnect")
+	dir := withNet(t, "lo")
+	m := New(&fakeStarter{script: func(p *fakeProc) {
+		_ = os.Mkdir(filepath.Join(dir, "br-abc123"), 0o755)
+		_ = os.Mkdir(filepath.Join(dir, "tun1"), 0o755)
+		printThenExit(nil, "Sign-in complete")(p)
+	}})
+	if err := m.Up(ctx(t), gp, "pw"); err != nil {
+		t.Fatal(err)
+	}
+	_ = os.Remove(filepath.Join(dir, "br-abc123")) // a bridge coming and going changes nothing
+	if m.Status("gov") != Up {
+		t.Error("the bridge must not be mistaken for the tunnel")
+	}
+	_ = os.Remove(filepath.Join(dir, "tun1"))
+	if m.Status("gov") != Down {
+		t.Error("tun1 is the tunnel")
+	}
+}
+
+// seqStarter runs a different script for each process it starts, and remembers the commands.
+type seqStarter struct {
+	scripts []func(*fakeProc)
+	argvs   [][]string
+}
+
+func (s *seqStarter) Start(_ context.Context, argv []string, _ string) (Proc, error) {
+	i := len(s.argvs)
+	s.argvs = append(s.argvs, argv)
+	p := &fakeProc{lines: make(chan string, 8), done: make(chan struct{})}
+	if i >= len(s.scripts) {
+		i = len(s.scripts) - 1
+	}
+	go s.scripts[i](p)
+	return p, nil
+}
+
+func TestStaleGpclientIsDisconnectedAndConnectRetriedOnce(t *testing.T) {
+	withClients(t, "gpclient", "openconnect")
+	withNet(t, "lo")
+	s := &seqStarter{scripts: []func(*fakeProc){
+		printThenExit(errors.New("exit status 1"), "Error: Another instance of the client is already running"),
+		printThenExit(nil, "disconnected"),
+		printThenExit(nil, "Sign-in complete"),
+	}}
+	m := New(s)
+	if err := m.Up(ctx(t), gp, "pw"); err != nil {
+		t.Fatal(err)
+	}
+	if len(s.argvs) != 3 || !slices.Contains(s.argvs[1], "disconnect") || !slices.Contains(s.argvs[2], "connect") {
+		t.Fatalf("commands = %v, want connect, disconnect, connect", s.argvs)
+	}
+	if m.Status("gov") != Up {
+		t.Errorf("status %v", m.Status("gov"))
+	}
+}
+
+func TestStaleGpclientIsOnlyRetriedOnce(t *testing.T) {
+	withClients(t, "gpclient", "openconnect")
+	withNet(t, "lo")
+	stale := printThenExit(errors.New("exit status 1"), "Error: Another instance of the client is already running")
+	s := &seqStarter{scripts: []func(*fakeProc){stale, printThenExit(nil), stale}}
+	err := New(s).Up(ctx(t), gp, "pw")
+	if err == nil || !strings.Contains(err.Error(), "Another instance") {
+		t.Fatalf("err = %v, want the client's message after one retry", err)
+	}
+	if len(s.argvs) != 3 {
+		t.Errorf("commands = %d, want 3 (no endless loop)", len(s.argvs))
 	}
 }

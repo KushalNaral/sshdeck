@@ -7,6 +7,8 @@ import {store} from '../models';
 
 export function Analyze(arg1:string):Promise<probe.Report>;
 
+export function ApplyImport(arg1:string,arg2:Array<number>):Promise<main.ImportResult>;
+
 export function AttachShell(arg1:string,arg2:number,arg3:number,arg4:number):Promise<void>;
 
 export function ChangePassphrase(arg1:string,arg2:string):Promise<void>;
@@ -19,6 +21,12 @@ export function ConfirmManualVPN(arg1:string):Promise<void>;
 
 export function Connect(arg1:string):Promise<main.ConnectResult>;
 
+export function CopyLogin(arg1:string,arg2:string,arg3:string):Promise<void>;
+
+export function CopySSHCommand(arg1:string):Promise<void>;
+
+export function DeleteLogin(arg1:string,arg2:string):Promise<void>;
+
 export function DeleteServer(arg1:string):Promise<void>;
 
 export function DeleteTask(arg1:string):Promise<void>;
@@ -30,6 +38,8 @@ export function DisableLock(arg1:string):Promise<void>;
 export function Disconnect(arg1:string):Promise<void>;
 
 export function EnableLock(arg1:string):Promise<Array<string>>;
+
+export function ExportCSV():Promise<string>;
 
 export function InstallDependencies(arg1:Array<string>):Promise<void>;
 
@@ -47,13 +57,21 @@ export function LockState():Promise<main.LockInfo>;
 
 export function OpenContainerShell(arg1:string,arg2:number,arg3:string,arg4:string,arg5:boolean):Promise<void>;
 
+export function PickImport():Promise<main.ImportPreview>;
+
 export function RecordConfirm(arg1:string,arg2:string):Promise<void>;
+
+export function SaveLogin(arg1:string,arg2:store.Login,arg3:string):Promise<store.Login>;
 
 export function SaveServer(arg1:store.Server,arg2:string):Promise<store.Server>;
 
 export function SaveTask(arg1:store.Task):Promise<store.Task>;
 
+export function SaveTemplate():Promise<string>;
+
 export function SaveVPN(arg1:store.VPN,arg2:string):Promise<store.VPN>;
+
+export function SetAutoReconnect(arg1:boolean):Promise<void>;
 
 export function SetLockSettings(arg1:number,arg2:boolean):Promise<void>;
 

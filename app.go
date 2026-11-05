@@ -31,6 +31,11 @@ type App struct {
 	dial     func(ctx context.Context, srv store.Server, secret string) (sshx.Client, error)
 	lookPath func(file string) (string, error)
 
+	// The clipboard, and how long a copied password stays on it.
+	clipSet func(string) error
+	clipGet func() (string, error)
+	clipTTL time.Duration
+
 	// audit records an event (what happened, to what, a short detail). It never gets a secret.
 	audit func(event, subject, detail string)
 	alog  *audit.Log
@@ -38,6 +43,8 @@ type App struct {
 	vaultPath, settingsPath, plainPath string
 	secrets                            store.Secrets    // where passwords go when the passphrase lock is turned off
 	clock                              func() time.Time // a seam for the idle timer
+	vpnPoll                            time.Duration    // how often a live connection checks that its VPN tunnel is still up
+	backoff                            []time.Duration  // waits before each reconnect attempt; its length is the number of attempts
 
 	mu         sync.Mutex
 	settings   Settings
@@ -45,6 +52,7 @@ type App struct {
 	conns      map[string]*conn         // live connections by server id
 	cancels    map[string]func()        // connects still in flight
 	manual     map[string]chan struct{} // waiting on "I connected the VPN" by server id
+	pending    *pending                 // the CSV waiting for the user to pick rows
 }
 
 func NewApp() (*App, error) {
@@ -84,6 +92,7 @@ func NewApp() (*App, error) {
 		}
 	}
 	a.emit = func(name string, data ...any) { runtime.EventsEmit(a.ctx, name, data...) }
+	a.useSystemClipboard()
 	return a, nil
 }
 
@@ -91,7 +100,8 @@ func newApp(st *store.Store, m vpn.Manager, dial func(context.Context, store.Ser
 	return &App{
 		ctx: context.Background(), st: st, vpn: m, dial: dial, lookPath: exec.LookPath,
 		emit: func(string, ...any) {}, audit: func(string, string, string) {},
-		secrets: store.Keyring{}, clock: time.Now, settings: defaultSettings(), lastActive: time.Now(),
+		clipSet: func(string) error { return nil }, clipGet: func() (string, error) { return "", nil }, clipTTL: clipboardTTL,
+		secrets: store.Keyring{}, clock: time.Now, vpnPoll: 5 * time.Second, backoff: []time.Duration{2 * time.Second, 4 * time.Second, 8 * time.Second, 16 * time.Second, 30 * time.Second}, settings: defaultSettings(), lastActive: time.Now(),
 		conns: map[string]*conn{}, cancels: map[string]func(){}, manual: map[string]chan struct{}{},
 	}
 }

@@ -42,7 +42,13 @@ export function ConnectBar({ server, vpn, session, onConnect, onDisconnect, onMa
         {server.production && <span className="prod" title="Production server: be careful what you run">PRODUCTION</span>}
         {session?.state === 'live' && (
           <>
-            <span className="good label">Live</span>
+            {session.link?.state === 'reconnecting' ? (
+              <span className="label" role="status">Reconnecting… {session.link.attempt}/{session.link.max}</span>
+            ) : session.link?.state === 'lost' ? (
+              <span className="bad" role="alert"><strong>{session.link.problem}</strong> {session.link.recovery}</span>
+            ) : (
+              <span className="good label">Live</span>
+            )}
             <button className="btn" onClick={onDisconnect}>
               Disconnect
             </button>

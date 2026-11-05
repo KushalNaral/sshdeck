@@ -272,3 +272,25 @@ func TestDisableLockNeedsTheRightPassphraseAndKeepsTheVaultOnFailure(t *testing.
 		t.Errorf("locked store: %v", err)
 	}
 }
+
+func TestLoginSecretsMoveIntoTheVaultAndBack(t *testing.T) {
+	s, sec, _, vpath := plainWithData(t)
+	sv := s.Servers()[0]
+	l, err := s.SaveLogin(sv.ID, Login{Label: "DB", Kind: "db", User: "root"}, "db-secret")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.EnableLock(vpath, "pass phrase"); err != nil {
+		t.Fatal(err)
+	}
+	if len(sec) != 0 {
+		t.Errorf("keyring still holds %d secrets, including login secrets", len(sec))
+	}
+	raw, _ := os.ReadFile(vpath)
+	if bytes.Contains(raw, []byte("db-secret")) {
+		t.Error("login secret in the clear")
+	}
+	if pw, err := s.Password("login", sv.ID+"/"+l.ID); err != nil || pw != "db-secret" {
+		t.Fatalf("after enabling: %q %v", pw, err)
+	}
+}

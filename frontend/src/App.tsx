@@ -7,6 +7,7 @@ import { Confirm } from './components/Confirm'
 import { Connection } from './components/Connection'
 import { Mark } from './components/Mark'
 import { Analysis } from './components/Analysis'
+import { Logins } from './components/Logins'
 import { ConnectBar } from './components/ConnectBar'
 import { TasksBoard } from './components/TasksBoard'
 import { Palette } from './components/Palette'
@@ -19,7 +20,7 @@ import { vpnOf } from './lib/status'
 import { triage } from './lib/triage'
 import { lockApi, type LockState } from './lib/lock'
 import { applyTheme, loadTheme, THEMES } from './lib/theme'
-import type { Analysis as AnalysisData, ContainerTab, Mode, Server, Session, Task, Vpn } from './types'
+import type { Analysis as AnalysisData, ContainerTab, Login, Mode, Server, Session, Task, Vpn } from './types'
 
 export default function App() {
   const [mode, setMode] = useState<Mode>('firefight')
@@ -33,7 +34,7 @@ export default function App() {
   const [scanning, setScanning] = useState<string | null>(null)
   const [scanErrors, setScanErrors] = useState<Record<string, string>>({})
   const [palette, setPalette] = useState(false)
-  const [ask, setAsk] = useState<{ title: string; body: string; label: string; run: () => void } | null>(null)
+  const [ask, setAsk] = useState<{ title: string; body: string; label: string; run: () => void; cancelled?: () => void } | null>(null)
   const [theme, setTheme] = useState(loadTheme)
   const cycleTheme = () => {
     const next = THEMES[(THEMES.indexOf(theme) + 1) % THEMES.length]
@@ -48,6 +49,8 @@ export default function App() {
   const now = useNow(30_000)
   const attempts = useRef<Record<string, number>>({}) // connect attempt number per server, so a cancelled attempt's late result is ignored
   latest.current = config
+  const sessionsRef = useRef(sessions)
+  sessionsRef.current = sessions
 
   const lockRef = useRef(lock)
   lockRef.current = lock
@@ -123,6 +126,13 @@ export default function App() {
     [patch],
   )
 
+  // A dropped link is redialled in Go; show how that is going on the server's session.
+  const liveIds = Object.values(sessions).filter((s) => s.state === 'live').map((s) => s.serverId).sort().join(',')
+  useEffect(() => {
+    const offs = liveIds.split(',').filter(Boolean).map((id) => backend.onLink(id, (l) => patch(id, (s) => ({ ...s, link: l.state === 'live' ? undefined : l }))))
+    return () => offs.forEach((off) => off())
+  }, [liveIds, patch])
+
   const disconnect = (id: string) => {
     attempts.current[id] = (attempts.current[id] ?? 0) + 1
     backend.disconnect(id)
@@ -138,16 +148,36 @@ export default function App() {
     [patch],
   )
   // Production servers ask first. The confirmation is written to the audit trail, then the action runs.
-  const requestConnect = (id: string) => {
+  // Resolves when the connect has finished, or when the question was answered No.
+  const requestConnect = (id: string): Promise<void> => {
     const sv = latest.current.servers.find((x) => x.id === id)
-    if (!sv?.production) return void connect(id)
-    setAsk({
-      title: `Connect to ${sv.name}?`,
-      body: `${sv.name} is a production server. You will be signed in as ${sv.user}@${sv.host}.`,
-      label: 'Connect to production',
-      run: () => (auditApi.confirm(id, 'connect'), void connect(id)),
-    })
+    if (!sv?.production) return connect(id)
+    return new Promise((resolve) =>
+      setAsk({
+        title: `Connect to ${sv.name}?`,
+        body: `${sv.name} is a production server. You will be signed in as ${sv.user}@${sv.host}.`,
+        label: 'Connect to production',
+        run: () => (auditApi.confirm(id, 'connect'), void connect(id).then(resolve)),
+        cancelled: resolve,
+      }),
+    )
   }
+
+  // Servers marked "connect on start" are connected once per launch, one after another so that password prompts
+  // (a VPN asks for admin rights) never pile up. Production ones come last, each after its own confirmation.
+  const started = useRef(false)
+  useEffect(() => {
+    if (!loaded || started.current || lock?.locked) return
+    started.current = true
+    const want = config.servers.filter((s) => s.autoConnect)
+    void (async () => {
+      for (const sv of [...want.filter((s) => !s.production), ...want.filter((s) => s.production)]) {
+        if (!latest.current.servers.some((s) => s.id === sv.id) || sessionsRef.current[sv.id]) continue
+        await requestConnect(sv.id)
+      }
+    })()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loaded, lock?.locked])
   const requestExec = (id: string, c: ContainerTab) => {
     const sv = latest.current.servers.find((x) => x.id === id)
     const asRoot = c.sudo || c.user === '' || c.user === 'root' || c.user === '0'
@@ -204,6 +234,28 @@ export default function App() {
         return rest
       })
     })
+  const setLogins = (sid: string, f: (l: Login[]) => Login[]) => setConfig((c) => ({ ...c, servers: c.servers.map((s) => (s.id === sid ? { ...s, logins: f(s.logins ?? []) } : s)) }))
+  const saveLogin = (sid: string, l: Login, pw: string) =>
+    attempt(async () => {
+      const saved = await configStore.saveLogin(sid, l, pw)
+      setLogins(sid, (list) => upsert(list, saved))
+    })
+  const deleteLogin = (sid: string, id: string) =>
+    attempt(async () => {
+      await configStore.deleteLogin(sid, id)
+      setLogins(sid, (list) => list.filter((x) => x.id !== id))
+    })
+  // Keeps the scan: saveServer drops it, but a tracked version changes nothing about what the scan found.
+  const trackSoftware = (id: string, name: string, version: string) => {
+    const sv = latest.current.servers.find((x) => x.id === id)
+    if (!sv) return
+    const has = sv.software.some((x) => x.name.toLowerCase() === name.toLowerCase())
+    const software = has ? sv.software.map((x) => (x.name.toLowerCase() === name.toLowerCase() ? { ...x, version } : x)) : [...sv.software, { name, version, target: '' }]
+    void attempt(async () => {
+      const saved = await configStore.saveServer({ ...sv, software }, '')
+      setConfig((c) => ({ ...c, servers: upsert(c.servers, saved) }))
+    })
+  }
   const deleteServer = (id: string) =>
     attempt(async () => {
       await configStore.deleteServer(id)
@@ -236,12 +288,16 @@ export default function App() {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (!e.ctrlKey) return
-      if (e.key === 'k') (e.preventDefault(), setPalette(true))
-      else if (e.key === 't' && sessions[selected]?.state === 'live') (e.preventDefault(), addTab(selected))
-      else if (e.key === 'l' && lockRef.current?.enabled) (e.preventDefault(), void lockApi.lock())
-      else if (e.key === '1') (e.preventDefault(), setMode('firefight'))
-      else if (e.key === '2') (e.preventDefault(), setMode('tasks'))
-      else if (e.key === '3') (e.preventDefault(), setMode('admin'))
+      const act = (f: () => void) => {
+        e.preventDefault()
+        f()
+      }
+      if (e.key === 'k') act(() => setPalette(true))
+      else if (e.key === 't' && sessions[selected]?.state === 'live') act(() => addTab(selected))
+      else if (e.key === 'l' && lockRef.current?.enabled) act(() => void lockApi.lock())
+      else if (e.key === '1') act(() => setMode('firefight'))
+      else if (e.key === '2') act(() => setMode('tasks'))
+      else if (e.key === '3') act(() => setMode('admin'))
     }
     // Capture phase: xterm stops key events before they bubble, so shortcuts must be caught first.
     window.addEventListener('keydown', onKey, true)
@@ -332,7 +388,7 @@ export default function App() {
             onCloseTab={closeTab}
           />
         </div>
-        <Analysis server={server} triage={levels[server.id]} data={analysis[selected]} scanning={scanning === selected} error={scanErrors[selected]} connected={live} onExec={(c) => requestExec(selected, c)} onRescan={() => void scan(selected)} connection={<Connection server={server} vpns={vpns} session={sess} />} />
+        <Analysis server={server} triage={levels[server.id]} data={analysis[selected]} scanning={scanning === selected} error={scanErrors[selected]} connected={live} onExec={(c) => requestExec(selected, c)} onRescan={() => void scan(selected)} onTrack={(n, v) => trackSoftware(selected, n, v)} onCopySsh={() => attempt(() => configStore.copySSH(selected))} connection={<Connection server={server} vpns={vpns} session={sess} />} logins={<Logins server={server} onCopy={(l, f) => attempt(() => configStore.copyLogin(selected, l.id, f))} />} />
       </main>
       )}
 
@@ -353,7 +409,7 @@ export default function App() {
 
       {mode === 'admin' && (
         <main className="stage">
-          <Admin servers={servers} vpns={vpns} lock={lock} onLockChange={setLock} onSaveServer={saveServer} onDeleteServer={deleteServer} onSaveVpn={saveVpn} onDeleteVpn={deleteVpn} />
+          <Admin servers={servers} vpns={vpns} lock={lock} onLockChange={setLock} onSaveServer={saveServer} onDeleteServer={deleteServer} onSaveVpn={saveVpn} onDeleteVpn={deleteVpn} onSaveLogin={saveLogin} onDeleteLogin={deleteLogin} onImported={() => void configStore.load().then(setConfig).catch((e) => setLoadError(messageOf(e)))} />
         </main>
       )}
 
@@ -377,7 +433,7 @@ export default function App() {
         title={ask.title}
         body={ask.body}
         confirmLabel={ask.label}
-        onCancel={() => setAsk(null)}
+        onCancel={() => (ask.cancelled?.(), setAsk(null))}
         onConfirm={() => {
           const run = ask.run
           setAsk(null)
