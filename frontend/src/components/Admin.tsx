@@ -3,6 +3,7 @@ import { viaLabel } from '../lib/status'
 import type { Login, Server, Vpn, VpnKind } from '../types'
 import { VPN_LABEL } from '../types'
 import { AuditPanel } from './AuditPanel'
+import { GatewayCert } from './GatewayCert'
 import { ImportPanel } from './ImportPanel'
 import { LoginsEditor } from './LoginsEditor'
 import { ReconnectSetting, SecurityPanel } from './SecurityPanel'
@@ -193,10 +194,20 @@ function VpnForm({ initial, isNew, onSave, onCancel, onDelete }: { initial: Vpn;
       <Field label="Password">
         <input type="password" autoComplete="new-password" value={pw} placeholder={isNew ? 'Stored in the OS keyring' : 'Leave blank to keep the stored password'} onChange={(e) => setPw(e.target.value)} />
       </Field>
-      {d.kind === 'forti' && (
-        <Field label="Trusted certificate (optional)">
-          <input value={d.trustedCert ?? ''} placeholder="sha256 digest; filled in when the gateway's certificate is rejected" onChange={(e) => set('trustedCert', e.target.value.trim())} />
-        </Field>
+      {d.kind !== 'hillstone' && (
+        <>
+          <GatewayCert
+            gateway={d.gateway}
+            port={d.port}
+            trustedCert={d.trustedCert}
+            trustedPin={d.trustedPin}
+            onTrust={(c) => setD((p) => ({ ...p, trustedCert: c.sha256, trustedPin: c.pin }))}
+            onClear={() => setD((p) => ({ ...p, trustedCert: '', trustedPin: '' }))}
+          />
+          <Field label="Trusted certificate (optional)">
+            <input value={d.trustedCert ?? ''} placeholder="sha256 digest; filled in by Fetch from gateway, or when a connect is rejected" onChange={(e) => set('trustedCert', e.target.value.trim())} />
+          </Field>
+        </>
       )}
       {d.kind === 'hillstone' && <p className="dim">Hillstone has no Linux command-line client. sshdeck will ask you to connect it yourself, then confirm.</p>}
       <Note />

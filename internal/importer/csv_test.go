@@ -131,3 +131,19 @@ func TestAutoConnectColumn(t *testing.T) {
 		t.Fatalf("%v %+v", err, rows)
 	}
 }
+
+func TestExportKeepsAPinWhenThereIsNoDigest(t *testing.T) {
+	pin := "pin-sha256:" + strings.Repeat("E", 43) + "="
+	vpns := []store.VPN{{ID: "v1", Name: "G", Kind: store.GP, Gateway: "gw.example.org", Port: 443, User: "u", TrustedPin: pin}}
+	var buf bytes.Buffer
+	if err := WriteCSV(&buf, vpns, nil); err != nil {
+		t.Fatal(err)
+	}
+	rows, err := ParseCSV(&buf)
+	if err != nil || len(rows) != 1 || rows[0].Err != "" {
+		t.Fatalf("%v %+v", err, rows)
+	}
+	if rows[0].VPN.TrustedCert != pin {
+		t.Errorf("trusted_cert = %q, want the pin kept", rows[0].VPN.TrustedCert)
+	}
+}

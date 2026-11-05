@@ -217,6 +217,13 @@ func record(m map[string]string) []string {
 	return out
 }
 
+func firstNonEmpty(a, b string) string {
+	if a != "" {
+		return a
+	}
+	return b
+}
+
 func yes(b bool) string {
 	if b {
 		return "yes"
@@ -232,7 +239,7 @@ func WriteCSV(w io.Writer, vpns []store.VPN, servers []store.Server) error {
 	for _, v := range vpns {
 		names[v.ID] = v.Name
 		_ = cw.Write(record(map[string]string{"type": "vpn", "name": v.Name, "host": v.Gateway, "port": strconv.Itoa(v.Port), "user": v.User,
-			"vpn_kind": string(v.Kind), "trusted_cert": v.TrustedCert, "note": v.Note}))
+			"vpn_kind": string(v.Kind), "trusted_cert": firstNonEmpty(v.TrustedCert, v.TrustedPin), "note": v.Note}))
 	}
 	for _, s := range servers {
 		_ = cw.Write(record(map[string]string{"type": "server", "name": s.Name, "host": s.Host, "port": strconv.Itoa(s.Port), "user": s.User,

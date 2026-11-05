@@ -3,6 +3,7 @@
 import {probe} from '../models';
 import {main} from '../models';
 import {update} from '../models';
+import {vpn} from '../models';
 import {audit} from '../models';
 import {store} from '../models';
 
@@ -43,6 +44,8 @@ export function Disconnect(arg1:string):Promise<void>;
 export function EnableLock(arg1:string):Promise<Array<string>>;
 
 export function ExportCSV():Promise<string>;
+
+export function FetchGatewayCert(arg1:string,arg2:number):Promise<vpn.CertInfo>;
 
 export function InstallDependencies(arg1:Array<string>):Promise<void>;
 

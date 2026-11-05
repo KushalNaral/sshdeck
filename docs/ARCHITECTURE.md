@@ -162,10 +162,10 @@ in again on a fresh connection.
 
 ### Gateway certificates
 
-Many FortiGate gateways present their **factory certificate**. The one on the SAVE gateway looks like this:
+Many FortiGate gateways present their **factory certificate**. One looks like this:
 
 ```
-subject: C=US, ST=California, L=Sunnyvale, O=Fortinet, OU=FortiGate, CN=FG100D3G16813519, emailAddress=support@fortinet.com
+subject: C=US, ST=California, L=Sunnyvale, O=Fortinet, OU=FortiGate, CN=FG100D0000000000, emailAddress=support@fortinet.com
 issuer:  C=US, ST=California, L=Sunnyvale, O=Fortinet, OU=Certificate Authority, CN=support, emailAddress=support@fortinet.com
 valid:   2016-05-26 to 2038-01-19      CA:FALSE
 ```
@@ -178,8 +178,15 @@ installs a different one. It is long-lived (until 2038) and unique per device.
 Why Linux rejects it: the signing CA is Fortinet's private one, which is not in any system trust store, so the chain
 cannot be validated. Nothing is wrong with the connection itself.
 
-What sshdeck does: `openfortivpn` prints the certificate's SHA-256 digest (the hash of its DER encoding) when it
-rejects it. sshdeck reports the digest and offers a **Trusted certificate** field on the VPN profile. With a digest
+What sshdeck does: the VPN profile has a **Gateway certificate** section with a **Fetch from gateway** button
+(`vpn.FetchCert`). It connects to the gateway over TLS, reads the certificate without logging in, and shows its subject,
+issuer, validity, whether this computer already trusts it, and its SHA-256 fingerprint in the colon-separated form
+administrators publish. **Trust this certificate** then fills in both forms of the pin: the certificate digest
+(`openfortivpn`'s `trusted-cert`) and the public-key pin (`pin-sha256:…`, openconnect's `--servercert`, which is preferred
+when present). Nothing is trusted until the user clicks, and the screen says to compare the fingerprint with one from the
+gateway's administrator, since a certificate read over a network someone else controls could be theirs. Failing a connect
+still works too: `openfortivpn` prints the certificate's SHA-256 digest (the hash of its DER encoding) when it
+rejects it, and sshdeck reports it for the **Trusted certificate** field. With a digest
 saved, `openfortivpn` accepts exactly that certificate and nothing else, which is pinning. Because the factory
 certificate is unique per device, a pinned digest also catches a different device answering at the same address.
 The proper long-term fix is for the gateway's administrator to install a certificate from a public CA, after which

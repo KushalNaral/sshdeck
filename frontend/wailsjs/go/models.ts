@@ -426,6 +426,7 @@ export namespace store {
 	    user: string;
 	    note?: string;
 	    trustedCert?: string;
+	    trustedPin?: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new VPN(source);
@@ -441,6 +442,7 @@ export namespace store {
 	        this.user = source["user"];
 	        this.note = source["note"];
 	        this.trustedCert = source["trustedCert"];
+	        this.trustedPin = source["trustedPin"];
 	    }
 	}
 
@@ -469,6 +471,63 @@ export namespace update {
 	        this.pageUrl = source["pageUrl"];
 	        this.canInstall = source["canInstall"];
 	    }
+	}
+
+}
+
+export namespace vpn {
+	
+	export class CertInfo {
+	    subject: string;
+	    issuer: string;
+	    names: string[];
+	    // Go type: time
+	    notBefore: any;
+	    // Go type: time
+	    notAfter: any;
+	    expired: boolean;
+	    selfSigned: boolean;
+	    trustedBySystem: boolean;
+	    sha256: string;
+	    pin: string;
+	    fingerprint: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new CertInfo(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.subject = source["subject"];
+	        this.issuer = source["issuer"];
+	        this.names = source["names"];
+	        this.notBefore = this.convertValues(source["notBefore"], null);
+	        this.notAfter = this.convertValues(source["notAfter"], null);
+	        this.expired = source["expired"];
+	        this.selfSigned = source["selfSigned"];
+	        this.trustedBySystem = source["trustedBySystem"];
+	        this.sha256 = source["sha256"];
+	        this.pin = source["pin"];
+	        this.fingerprint = source["fingerprint"];
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
 	}
 
 }

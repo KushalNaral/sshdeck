@@ -383,3 +383,18 @@ func TestTrustedCertAcceptsAnOpenconnectPin(t *testing.T) {
 		}
 	}
 }
+
+func TestTrustedPinMustBeAPin(t *testing.T) {
+	v := VPN{Name: "G", Kind: GP, Gateway: "gw.example.org", Port: 443, User: "u"}
+	for pin, ok := range map[string]bool{
+		"pin-sha256:" + strings.Repeat("A", 43) + "=": true,
+		"":                       true,
+		strings.Repeat("ab", 32): false, // a digest is a TrustedCert, not a pin
+		"pin-sha256:short":       false,
+	} {
+		v.TrustedPin = pin
+		if err := ValidateVPN(v, ""); (err == nil) != ok {
+			t.Errorf("pin %q: err = %v, want ok=%v", pin, err, ok)
+		}
+	}
+}

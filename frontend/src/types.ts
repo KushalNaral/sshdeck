@@ -11,6 +11,8 @@ export interface Vpn {
   note?: string
   /** sha256 of a gateway certificate to accept (FortiClient gateways with a self-signed certificate). */
   trustedCert?: string
+  /** The same certificate as a pin-sha256 of its public key (openconnect). Filled in with trustedCert. */
+  trustedPin?: string
 }
 
 // One cell of the fixed-cell state mark: filled holds, hollow does not, struck is a problem, confirmed is live.

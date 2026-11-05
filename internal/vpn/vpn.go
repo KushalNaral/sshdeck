@@ -238,7 +238,11 @@ func command(v store.VPN, secret string) (argv []string, stdin, ready string, st
 			argv := []string{pk, tool, "--fix-openssl", "connect", server, "-u", v.User, "--auto-gateway", "--passwd-on-stdin", "--background"}
 			return argv, secret + "\n", "", []string{pk, tool, "disconnect"}, cleanup, nil
 		}
-		return []string{pk, tool, "--protocol=gp", "--user", v.User, "--passwd-on-stdin", gw}, secret + "\n", "Connected as", nil, cleanup, nil
+		argv := []string{pk, tool, "--protocol=gp", "--user", v.User, "--passwd-on-stdin"}
+		if c := serverCertArg(v); c != "" {
+			argv = append(argv, "--servercert", c)
+		}
+		return append(argv, gw), secret + "\n", "Connected as", nil, cleanup, nil
 	case store.Hillstone:
 		return nil, "", "", nil, cleanup, ErrManual
 	}
@@ -262,13 +266,25 @@ func windowsCommand(v store.VPN, secret string) (argv []string, stdin, ready str
 		server = fmt.Sprintf("%s:%d", v.Gateway, v.Port)
 	}
 	argv = []string{tool, proto, "--user", v.User, "--passwd-on-stdin"}
-	if c := v.TrustedCert; c != "" {
-		if !strings.HasPrefix(c, "pin-sha256:") {
-			c = "sha256:" + c
-		}
+	if c := serverCertArg(v); c != "" {
 		argv = append(argv, "--servercert", c)
 	}
 	return append(argv, server), secret + "\n", "Connected as", nil, cleanup, nil
+}
+
+// serverCertArg is the value for openconnect's --servercert: the fetched pin when there is one, else the stored
+// certificate (a pin as it is, a digest in the sha256: form).
+func serverCertArg(v store.VPN) string {
+	switch c := v.TrustedCert; {
+	case v.TrustedPin != "":
+		return v.TrustedPin
+	case c == "":
+		return ""
+	case strings.HasPrefix(c, "pin-sha256:"):
+		return c
+	default:
+		return "sha256:" + c
+	}
 }
 
 // explain turns the client's last output lines into one error: its ERROR lines, or else the last line.

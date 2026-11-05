@@ -153,6 +153,9 @@ type VPN struct {
 	Note    string  `json:"note,omitempty"`
 	// TrustedCert is the sha256 of the gateway certificate to accept (FortiClient gateways with a self-signed certificate).
 	TrustedCert string `json:"trustedCert,omitempty"`
+	// TrustedPin is the same certificate as a pin-sha256 of its public key, the form openconnect takes. "Fetch from
+	// gateway" fills in both; openfortivpn uses TrustedCert and openconnect prefers TrustedPin.
+	TrustedPin string `json:"trustedPin,omitempty"`
 }
 
 // Task is a to-do about one or more servers, such as "upgrade PHP on Atlas". Status is todo, doing or done.
@@ -315,6 +318,8 @@ func ValidateVPN(v VPN, password string) error {
 		return invalid("port must be 1-65535")
 	case v.Kind != Forti && v.Kind != GP && v.Kind != Hillstone:
 		return invalid("unknown VPN client %q", v.Kind)
+	case v.TrustedPin != "" && !pinOnlyRe.MatchString(v.TrustedPin):
+		return invalid("trusted pin must look like pin-sha256:… (44 characters of base64)")
 	case v.TrustedCert != "" && !certRe.MatchString(v.TrustedCert):
 		return invalid("trusted certificate must be a 64-character sha256 hex digest, or a pin-sha256:… pin")
 	}
@@ -337,6 +342,7 @@ func CheckVPN(v VPN, password string) error {
 }
 
 // A certificate is pinned by its sha256 digest (openfortivpn) or by openconnect's pin-sha256 form.
+var pinOnlyRe = regexp.MustCompile(`^pin-sha256:[A-Za-z0-9+/]{43}=$`)
 var certRe = regexp.MustCompile(`^([0-9a-fA-F]{64}|pin-sha256:[A-Za-z0-9+/]{43}=)$`)
 
 var slugRe = regexp.MustCompile(`[^a-z0-9]+`)

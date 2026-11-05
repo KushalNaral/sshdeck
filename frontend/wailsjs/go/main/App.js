@@ -78,6 +78,10 @@ export function ExportCSV() {
   return window['go']['main']['App']['ExportCSV']();
 }
 
+export function FetchGatewayCert(arg1, arg2) {
+  return window['go']['main']['App']['FetchGatewayCert'](arg1, arg2);
+}
+
 export function InstallDependencies(arg1) {
   return window['go']['main']['App']['InstallDependencies'](arg1);
 }
