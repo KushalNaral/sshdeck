@@ -224,6 +224,12 @@ GlobalProtect on Windows goes through openconnect, which cannot do single sign-o
 can be marked **manual** ("I connect this VPN myself"), which treats it like Hillstone: sshdeck waits for the official
 app and your confirmation, and never starts it.
 
+For GlobalProtect, openconnect reports itself as an old client (5.1.5-8) unless told otherwise, and portals that enforce
+a minimum client version refuse that with an HTTP 512 \"Custom error\" on the login. So `--version-string` is set to what
+the official clients report (6.3.3-650 on Windows, 6.3.3-619 on Linux, the same values gpclient uses). A profile can also
+\"Sign in at: the gateway directly\" (`--usergroup=gateway`), which skips the portal. A 512 in the client's output is
+explained in the connect error as a refused login. The helper's allow-list takes both options with validated values.
+
 ### Installing openconnect on Windows
 
 Admin, System offers an Install button for openconnect. It asks the elevated helper for one fixed job

@@ -274,3 +274,15 @@ func TestAVPNMarkedManualWaitsForYouLikeHillstone(t *testing.T) {
 		t.Errorf("sshdeck started the client for a VPN you connect yourself: %v", fv.up)
 	}
 }
+
+func TestPortal512IsExplainedAsARefusedLogin(t *testing.T) {
+	a, fv, _ := rig(t, okOpen(newShell()))
+	fv.err = &vpn.ClientError{Err: errors.New("Failed to complete authentication"), Command: "openconnect --protocol=gp gw", Output: []string{
+		"POST https://gw/global-protect/getconfig.esp", "Got HTTP response: HTTP/1.1 512 Custom error", "Unexpected 512 result from server", "Failed to complete authentication"}}
+	r := a.Connect("a")
+	for _, want := range []string{"512", "password", "Sign in at", "myself"} {
+		if !strings.Contains(r.Recovery, want) {
+			t.Errorf("recovery %q should mention %q", r.Recovery, want)
+		}
+	}
+}

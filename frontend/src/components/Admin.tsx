@@ -194,6 +194,14 @@ function VpnForm({ initial, isNew, onSave, onCancel, onDelete }: { initial: Vpn;
       <Field label="Password">
         <input type="password" autoComplete="new-password" value={pw} placeholder={isNew ? 'Stored in the OS keyring' : 'Leave blank to keep the stored password'} onChange={(e) => setPw(e.target.value)} />
       </Field>
+      {d.kind === 'gp' && (
+        <Field label="Sign in at">
+          <select value={d.loginAt ?? 'portal'} onChange={(e) => set('loginAt', e.target.value as 'portal' | 'gateway')}>
+            <option value="portal">The portal (the default)</option>
+            <option value="gateway">The gateway directly</option>
+          </select>
+        </Field>
+      )}
       {d.kind !== 'hillstone' && (
         <>
           <GatewayCert

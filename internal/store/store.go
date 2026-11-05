@@ -159,6 +159,9 @@ type VPN struct {
 	// Manual means sshdeck does not start this VPN: you connect it with its own app and confirm, as for Hillstone.
 	// For a gateway the command-line clients cannot sign in to.
 	Manual bool `json:"manual,omitempty"`
+	// LoginAt is where a GlobalProtect login goes: empty or "portal" (the default, as the official client does) or
+	// "gateway", which skips the portal. For portals set up so that logging in at the portal fails.
+	LoginAt string `json:"loginAt,omitempty"`
 }
 
 // Task is a to-do about one or more servers, such as "upgrade PHP on Atlas". Status is todo, doing or done.
@@ -321,6 +324,8 @@ func ValidateVPN(v VPN, password string) error {
 		return invalid("port must be 1-65535")
 	case v.Kind != Forti && v.Kind != GP && v.Kind != Hillstone:
 		return invalid("unknown VPN client %q", v.Kind)
+	case v.LoginAt != "" && v.LoginAt != "portal" && v.LoginAt != "gateway":
+		return invalid("sign in at must be portal or gateway")
 	case v.TrustedPin != "" && !pinOnlyRe.MatchString(v.TrustedPin):
 		return invalid("trusted pin must look like pin-sha256:… (44 characters of base64)")
 	case v.TrustedCert != "" && !certRe.MatchString(v.TrustedCert):

@@ -239,6 +239,7 @@ func command(v store.VPN, secret string) (argv []string, stdin, ready string, st
 			return argv, secret + "\n", "", []string{pk, tool, "disconnect"}, cleanup, nil
 		}
 		argv := []string{pk, tool, "--protocol=gp", "--user", v.User, "--passwd-on-stdin"}
+		argv = append(argv, gpOptions(v)...)
 		if c := serverCertArg(v); c != "" {
 			argv = append(argv, "--servercert", c)
 		}
@@ -270,10 +271,36 @@ func windowsCommand(v store.VPN, secret string) (argv []string, stdin, ready str
 		server = fmt.Sprintf("%s:%d", v.Gateway, v.Port)
 	}
 	argv = []string{tool, proto, "--user", v.User, "--passwd-on-stdin", "--non-inter"}
+	argv = append(argv, gpOptions(v)...)
 	if c := serverCertArg(v); c != "" {
 		argv = append(argv, "--servercert", c)
 	}
 	return append(argv, server), secret + "\n", openconnectReady, nil, cleanup, nil
+}
+
+// GlobalProtect client versions to report, from what the official clients send (the same ones gpclient uses).
+// openconnect's own default is 5.1.5-8, which portals that enforce a minimum client version refuse with a 512
+// "Custom error" on the login.
+const (
+	gpVersionWindows = "6.3.3-650"
+	gpVersionLinux   = "6.3.3-619"
+)
+
+// gpOptions are the openconnect options that only GlobalProtect takes: the client version to report, and, when the
+// profile says so, signing in at the gateway instead of the portal.
+func gpOptions(v store.VPN) []string {
+	if v.Kind != store.GP {
+		return nil
+	}
+	ver := gpVersionLinux
+	if goos == "windows" {
+		ver = gpVersionWindows
+	}
+	opts := []string{"--version-string", ver}
+	if v.LoginAt == "gateway" {
+		opts = append(opts, "--usergroup=gateway")
+	}
+	return opts
 }
 
 // serverCertArg is the value for openconnect's --servercert: the fetched pin when there is one, else the stored

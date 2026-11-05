@@ -409,3 +409,13 @@ func TestManualVPNRoundTrips(t *testing.T) {
 		t.Error("the manual flag was lost")
 	}
 }
+
+func TestLoginAtIsPortalOrGateway(t *testing.T) {
+	v := VPN{Name: "G", Kind: GP, Gateway: "gw.example.org", Port: 443, User: "u"}
+	for at, ok := range map[string]bool{"": true, "portal": true, "gateway": true, "both": false, "--x": false} {
+		v.LoginAt = at
+		if err := ValidateVPN(v, ""); (err == nil) != ok {
+			t.Errorf("loginAt %q: err = %v, want ok=%v", at, err, ok)
+		}
+	}
+}

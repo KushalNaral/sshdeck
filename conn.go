@@ -263,7 +263,9 @@ func (a *App) vpnUp(ctx context.Context, v store.VPN, set func(string, func(*Ste
 		if errors.As(err, &cerr) {
 			res.Details = "$ " + cerr.Command + "\n" + strings.Join(cerr.Output, "\n")
 		}
-		if strings.Contains(err.Error(), "Failed to complete authentication") {
+		if cerr != nil && strings.Contains(strings.Join(cerr.Output, "\n"), "512") {
+			res.Recovery = "The portal answered HTTP 512 to the login, which means it refused it: the user or password is wrong for this portal, or it rejected this client. Check the password stored for this VPN (try the same login in the official app or on the portal's web page). If they are right, edit the VPN profile and set Sign in at to Gateway, or tick \"I connect this VPN myself\" and use the official app."
+		} else if strings.Contains(err.Error(), "Failed to complete authentication") {
 			res.Recovery = "The gateway refused the login. Check the user and password. If they are right, this gateway may need single sign-on or a host check that openconnect cannot do: mark the VPN profile as \"I connect this VPN myself\" and use the official GlobalProtect or FortiClient app."
 		}
 		return res, true

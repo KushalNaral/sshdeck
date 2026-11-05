@@ -14,7 +14,7 @@ import (
 
 // Columns of the sshdeck CSV, in the order the template and the export write them. Every row has a type column:
 // vpn, server or login. Columns a row does not use stay empty; unknown columns in a file are ignored.
-var Columns = []string{"type", "name", "host", "port", "user", "auth", "key_path", "vpn", "vpn_kind", "trusted_cert", "manual", "password",
+var Columns = []string{"type", "name", "host", "port", "user", "auth", "key_path", "vpn", "vpn_kind", "trusted_cert", "manual", "login_at", "password",
 	"production", "auto_connect", "projects", "software", "server", "kind", "address", "note"}
 
 // Row is one parsed line. Err explains why the line cannot be imported; the other fields are then incomplete.
@@ -115,7 +115,7 @@ func parseRow(line int, get func(string) string) Row {
 			}
 		}
 		r.VPN = store.VPN{Name: r.Name, Kind: store.VPNKind(strings.ToLower(get("vpn_kind"))), Gateway: get("host"), Port: port,
-			User: get("user"), TrustedCert: get("trusted_cert"), Manual: truthy(get("manual")), Note: get("note")}
+			User: get("user"), TrustedCert: get("trusted_cert"), Manual: truthy(get("manual")), LoginAt: strings.ToLower(get("login_at")), Note: get("note")}
 		if err := store.ValidateVPN(r.VPN, r.Secret); err != nil {
 			return bad(err)
 		}
@@ -239,7 +239,7 @@ func WriteCSV(w io.Writer, vpns []store.VPN, servers []store.Server) error {
 	for _, v := range vpns {
 		names[v.ID] = v.Name
 		_ = cw.Write(record(map[string]string{"type": "vpn", "name": v.Name, "host": v.Gateway, "port": strconv.Itoa(v.Port), "user": v.User,
-			"vpn_kind": string(v.Kind), "trusted_cert": firstNonEmpty(v.TrustedCert, v.TrustedPin), "manual": yes(v.Manual), "note": v.Note}))
+			"vpn_kind": string(v.Kind), "trusted_cert": firstNonEmpty(v.TrustedCert, v.TrustedPin), "manual": yes(v.Manual), "login_at": v.LoginAt, "note": v.Note}))
 	}
 	for _, s := range servers {
 		_ = cw.Write(record(map[string]string{"type": "server", "name": s.Name, "host": s.Host, "port": strconv.Itoa(s.Port), "user": s.User,

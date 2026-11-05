@@ -430,6 +430,7 @@ export namespace store {
 	    trustedCert?: string;
 	    trustedPin?: string;
 	    manual?: boolean;
+	    loginAt?: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new VPN(source);
@@ -447,6 +448,7 @@ export namespace store {
 	        this.trustedCert = source["trustedCert"];
 	        this.trustedPin = source["trustedPin"];
 	        this.manual = source["manual"];
+	        this.loginAt = source["loginAt"];
 	    }
 	}
 

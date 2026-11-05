@@ -15,6 +15,8 @@ export interface Vpn {
   trustedPin?: string
   /** You connect this VPN yourself with its own app; sshdeck waits for you to confirm. */
   manual?: boolean
+  /** GlobalProtect: where the login goes. Empty or 'portal' is the default; 'gateway' skips the portal. */
+  loginAt?: 'portal' | 'gateway'
 }
 
 // One cell of the fixed-cell state mark: filled holds, hollow does not, struck is a problem, confirmed is live.

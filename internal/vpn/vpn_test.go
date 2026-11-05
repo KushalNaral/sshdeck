@@ -671,7 +671,7 @@ func TestWindowsGlobalProtectUsesOpenconnectDirectly(t *testing.T) {
 	if err := New(f).Up(ctx(t), gp, "hunter2"); err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"/Program Files/OpenConnect/openconnect.exe", "--protocol=gp", "--user", "support", "--passwd-on-stdin", "--non-inter", "connect.example.gov"}
+	want := []string{"/Program Files/OpenConnect/openconnect.exe", "--protocol=gp", "--user", "support", "--passwd-on-stdin", "--non-inter", "--version-string", "6.3.3-650", "connect.example.gov"}
 	if !slices.Equal(f.argv, want) {
 		t.Fatalf("argv %v\nwant %v", f.argv, want)
 	}
@@ -837,5 +837,90 @@ func TestFailureCarriesTheClientsOutputWithoutThePassword(t *testing.T) {
 	}
 	if !strings.Contains(ce.Command, "--protocol=gp") || strings.Contains(ce.Command, "hunter2") {
 		t.Errorf("command = %q", ce.Command)
+	}
+}
+
+func TestGlobalProtectReportsACurrentClientVersion(t *testing.T) {
+	// openconnect's default (5.1.5-8) is refused by portals that enforce a minimum client version, with a 512
+	// "Custom error"; gpclient, which works with them, reports a current official client.
+	asWindows(t)
+	f := &fakeStarter{script: printThenStay("Configured as 10.0.0.2")}
+	if err := New(f).Up(ctx(t), gp, "pw"); err != nil {
+		t.Fatal(err)
+	}
+	i := slices.Index(f.argv, "--version-string")
+	if i < 0 || f.argv[i+1] != "6.3.3-650" {
+		t.Errorf("argv %v, want --version-string 6.3.3-650 on Windows", f.argv)
+	}
+	if err := validateOpenconnectArgs(f.argv[1:]); err != nil {
+		t.Errorf("the helper would refuse our own command: %v", err)
+	}
+	f2 := &fakeStarter{script: printThenStay("Configured as 10.0.0.2")}
+	v := forti
+	if err := New(f2).Up(ctx(t), v, "pw"); err != nil {
+		t.Fatal(err)
+	}
+	if slices.Contains(f2.argv, "--version-string") {
+		t.Errorf("argv %v: the version string is a GlobalProtect setting, not for Fortinet", f2.argv)
+	}
+}
+
+func TestLinuxOpenconnectFallbackReportsTheLinuxVersion(t *testing.T) {
+	withClients(t, "openconnect")
+	f := &fakeStarter{script: printThenStay("Configured as 10.0.0.2")}
+	if err := New(f).Up(ctx(t), gp, "pw"); err != nil {
+		t.Fatal(err)
+	}
+	if i := slices.Index(f.argv, "--version-string"); i < 0 || f.argv[i+1] != "6.3.3-619" {
+		t.Errorf("argv %v", f.argv)
+	}
+}
+
+func TestSignInAtGatewaySkipsThePortal(t *testing.T) {
+	asWindows(t)
+	v := gp
+	v.LoginAt = "gateway"
+	f := &fakeStarter{script: printThenStay("Configured as 10.0.0.2")}
+	if err := New(f).Up(ctx(t), v, "pw"); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Contains(f.argv, "--usergroup=gateway") {
+		t.Errorf("argv %v, want --usergroup=gateway", f.argv)
+	}
+	if err := validateOpenconnectArgs(f.argv[1:]); err != nil {
+		t.Errorf("the helper would refuse our own command: %v", err)
+	}
+	f2 := &fakeStarter{script: printThenStay("Configured as 10.0.0.2")}
+	if err := New(f2).Up(ctx(t), gp, "pw"); err != nil {
+		t.Fatal(err)
+	}
+	for _, a := range f2.argv {
+		if strings.HasPrefix(a, "--usergroup") {
+			t.Errorf("argv %v: signing in at the portal is the default and needs no option", f2.argv)
+		}
+	}
+}
+
+func TestHelperAllowListChecksVersionAndUsergroupValues(t *testing.T) {
+	base := []string{"--protocol=gp", "--user", "me", "--passwd-on-stdin", "--non-inter"}
+	ok := [][]string{
+		append(append([]string{}, base...), "--version-string", "6.3.3-650", "--usergroup=gateway", "vpn.example.org"),
+		append(append([]string{}, base...), "--usergroup=portal", "vpn.example.org"),
+	}
+	for _, a := range ok {
+		if err := validateOpenconnectArgs(a); err != nil {
+			t.Errorf("%v refused: %v", a, err)
+		}
+	}
+	bad := [][]string{
+		append(append([]string{}, base...), "--version-string", "6.3 $(calc)", "vpn.example.org"),
+		append(append([]string{}, base...), "--version-string", "", "vpn.example.org"),
+		append(append([]string{}, base...), "--usergroup=evil", "vpn.example.org"),
+		append(append([]string{}, base...), "--usergroup", "gateway", "vpn.example.org"),
+	}
+	for _, a := range bad {
+		if err := validateOpenconnectArgs(a); err == nil {
+			t.Errorf("%v accepted", a)
+		}
 	}
 }

@@ -318,6 +318,8 @@ func allowOpenconnect(argv []string) error {
 	return validateOpenconnectArgs(argv[1:])
 }
 
+var versionRe = regexp.MustCompile(`^[0-9][0-9A-Za-z.-]{0,19}$`)
+
 var serverCertRe = regexp.MustCompile(`^(pin-sha256:[A-Za-z0-9+/]{43}=|sha256:[0-9a-fA-F]{64})$`)
 
 // validateOpenconnectArgs accepts exactly the options sshdeck itself builds, and checks every value, so the elevated
@@ -337,15 +339,22 @@ func validateOpenconnectArgs(args []string) error {
 			stdin = true
 		case a == "--non-inter":
 			// never wait for an answer: nobody can type one into a hidden process
-		case a == "--user" || a == "--servercert":
+		case a == "--usergroup=portal" || a == "--usergroup=gateway":
+			// where a GlobalProtect login goes
+		case a == "--user" || a == "--servercert" || a == "--version-string":
 			if i+1 >= len(args) {
 				return fmt.Errorf("%s needs a value", a)
 			}
 			i++
-			if a == "--user" {
+			switch a {
+			case "--user":
 				user = args[i]
-			} else {
+			case "--servercert":
 				cert = args[i]
+			default:
+				if !versionRe.MatchString(args[i]) {
+					return errors.New("client version is not valid")
+				}
 			}
 		case strings.HasPrefix(a, "-"):
 			return fmt.Errorf("option %q is not allowed", a)
