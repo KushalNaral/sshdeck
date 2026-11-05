@@ -5,7 +5,9 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"net"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -165,6 +167,12 @@ func (a *App) connect(serverID string) ConnectResult {
 
 	t := time.Now()
 	set("ssh", func(s *Step) { s.Status = "run" })
+	if vp != nil { // a VPN that has just come up may not have its routes in place yet
+		if err := a.waitRoute(ctx, sv, set); err != nil {
+			a.releaseVPN(vp)
+			return cancelled()
+		}
+	}
 	pw, err := a.serverSecret(sv)
 	if err != nil {
 		set("ssh", func(s *Step) { s.Status = "fail" })
@@ -277,6 +285,52 @@ func (a *App) vpnUp(ctx context.Context, v store.VPN, set func(string, func(*Ste
 
 // autoVPN reports whether sshdeck itself starts this VPN, as opposed to waiting for you to connect it.
 func autoVPN(v *store.VPN) bool { return vpn.Automatic(v.Kind) && !v.Manual }
+
+// probeTCP reports whether host:port accepts a connection.
+func probeTCP(ctx context.Context, host string, port int) error {
+	c, err := (&net.Dialer{}).DialContext(ctx, "tcp", net.JoinHostPort(host, strconv.Itoa(port)))
+	if err != nil {
+		return err
+	}
+	return c.Close()
+}
+
+// waitRoute waits until the server answers on its SSH port, for at most routeWait. A VPN client says the tunnel is up
+// a moment before its routes and DNS are in place, so the first connection attempt right after "up" can time out
+// although a retry a few seconds later works. When the time is up it returns nil all the same, so that SSH is tried
+// and its own error reaches the user. It returns an error only when the connect is cancelled.
+func (a *App) waitRoute(ctx context.Context, sv store.Server, set func(string, func(*Step))) error {
+	deadline := time.Now().Add(a.routeWait)
+	waiting := false
+	for {
+		pctx, cancel := context.WithTimeout(ctx, 3*time.Second)
+		err := a.probe(pctx, sv.Host, sv.Port)
+		cancel()
+		if err == nil {
+			if waiting {
+				set("ssh", func(s *Step) { s.Detail = fmt.Sprintf("%s@%s:%d", sv.User, sv.Host, sv.Port) })
+			}
+			return nil
+		}
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		if !waiting {
+			waiting = true
+			set("ssh", func(s *Step) {
+				s.Detail = fmt.Sprintf("%s@%s:%d · waiting for the VPN route", sv.User, sv.Host, sv.Port)
+			})
+		}
+		if time.Now().After(deadline) {
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(a.routePoll):
+		}
+	}
+}
 
 // shorten cuts text to at most n characters, with an ellipsis.
 func shorten(s string, n int) string {

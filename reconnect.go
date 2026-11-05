@@ -125,6 +125,7 @@ func (a *App) reconnect(ctx context.Context, serverID string, c *conn, vp *store
 				last = res
 				continue
 			}
+			_ = a.waitRoute(ctx, sv, func(string, func(*Step)) {}) // the restarted tunnel needs its routes too
 		}
 		pw, err := a.serverSecret(sv)
 		if err != nil {

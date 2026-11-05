@@ -23,10 +23,15 @@ import (
 
 // App holds the Go side the UI calls through Wails bindings.
 type App struct {
-	ctx     context.Context
-	st      *store.Store
-	vpn     vpn.Manager
-	version string // the running release, "dev" for a development build
+	ctx context.Context
+	st  *store.Store
+	vpn vpn.Manager
+	// After a VPN comes up its routes can lag a moment behind: SSH waits until the server answers on its port, for at
+	// most routeWait, checking every routePoll. probe is the check, replaceable in tests.
+	probe     func(ctx context.Context, host string, port int) error
+	routeWait time.Duration
+	routePoll time.Duration
+	version   string // the running release, "dev" for a development build
 	// The update steps, replaceable in tests.
 	updCheck   func(context.Context) (update.Info, error)
 	updInstall func(context.Context, update.Info) error
@@ -111,6 +116,7 @@ func newApp(st *store.Store, m vpn.Manager, dial func(context.Context, store.Ser
 		clipSet: func(string) error { return nil }, clipGet: func() (string, error) { return "", nil }, clipTTL: clipboardTTL,
 		secrets: store.Keyring{}, clock: time.Now, vpnPoll: 5 * time.Second, backoff: []time.Duration{2 * time.Second, 4 * time.Second, 8 * time.Second, 16 * time.Second, 30 * time.Second}, settings: defaultSettings(), lastActive: time.Now(),
 		conns: map[string]*conn{}, cancels: map[string]func(){}, manual: map[string]chan struct{}{}, version: version,
+		probe: probeTCP, routeWait: 30 * time.Second, routePoll: 700 * time.Millisecond,
 	}
 	a.updCheck = func(ctx context.Context) (update.Info, error) { return a.updater().Check(ctx) }
 	a.updInstall = a.realInstall

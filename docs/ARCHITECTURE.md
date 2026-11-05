@@ -119,6 +119,13 @@ sequenceDiagram
   unreachable host, changed host key, untrusted VPN certificate.
 - A VPN shared by several servers stays up until the last of those servers disconnects.
 
+After a VPN has come up, SSH does not start at once: `waitRoute` first checks that the server answers on its SSH port,
+every 0.7 s for up to 30 s, and the SSH step says "waiting for the VPN route" while it does. A client reports the tunnel
+up a moment before its routes and DNS are in place, and without this the first attempt timed out and only a retry worked
+(seen with GlobalProtect and openconnect on Windows). When the time runs out SSH is tried anyway, so its own error is the
+one the user sees; cancelling stops the wait and takes the VPN down as usual. The reconnect path does the same after it
+restarts a tunnel.
+
 ## 5. Terminals
 
 A connected server has **one SSH connection** (`sshx.Dial`) that every tab and the analysis share; each tab is a

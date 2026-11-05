@@ -238,6 +238,7 @@ func rigDial(t *testing.T, open openFn) (*App, *fakeVPN, *events, *dialer) {
 	fv, ev := &fakeVPN{}, &events{}
 	d := &dialer{open: open}
 	a := newApp(st, fv, d.dial)
+	a.probe = func(context.Context, string, int) error { return nil } // no real network in tests
 	a.emit = ev.emit
 	a.lookPath = func(string) (string, error) { return "/bin/true", nil } // pretend the VPN clients are installed
 	return a, fv, ev, d
