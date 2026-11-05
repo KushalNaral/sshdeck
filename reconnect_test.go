@@ -197,3 +197,41 @@ func TestVPNPollStopsOnDisconnect(t *testing.T) {
 		t.Errorf("dials = %d: a disconnected server must not be reconnected because its VPN died", d.count())
 	}
 }
+
+func TestVPNStepShowsWhatTheClientSaysWhileConnecting(t *testing.T) {
+	a, _, ev := rig(t, okOpen(newShell()))
+	if r := a.Connect("a"); !r.OK {
+		t.Fatalf("%+v", r)
+	}
+	var details []string
+	ev.mu.Lock()
+	for _, x := range ev.all["connect:a"] {
+		for _, s := range x.([]Step) {
+			if s.Key == "vpn" {
+				details = append(details, s.Detail)
+			}
+		}
+	}
+	ev.mu.Unlock()
+	var saw bool
+	for _, d := range details {
+		if d == "Forti · Attempting to connect to server" {
+			saw = true
+		}
+	}
+	if !saw {
+		t.Errorf("details = %v, want the client's line shown next to the VPN name", details)
+	}
+	if last := details[len(details)-1]; last != "Forti" {
+		t.Errorf("the finished step should show only the VPN name, got %q", last)
+	}
+}
+
+func TestShortenKeepsLongLinesReadable(t *testing.T) {
+	if got := shorten("abcdef", 4); got != "abc…" {
+		t.Errorf("got %q", got)
+	}
+	if got := shorten("abc", 4); got != "abc" {
+		t.Errorf("got %q", got)
+	}
+}

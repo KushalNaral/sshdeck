@@ -210,6 +210,13 @@ handles both protocols there (`--protocol=gp` and `--protocol=fortinet`). A cert
 The protocol, the allow-list and the process handling are ordinary Go and are tested on Linux; only the elevated launch
 is Windows-only, and the whole path has not been run against a real gateway.
 
+openconnect says "Connected as" in older versions and "Configured as" in current ones once the tunnel exists (the Fortinet
+protocol uses the newer wording), so `ready` is a list of phrases; "Connected to HTTPS" is only the TLS connection and is not
+one of them. The client runs with `--non-inter`, so an unknown certificate fails at once (and the pin hint becomes the
+certificate error shown to the user) instead of waiting for an answer nobody can type. While connecting, each line the
+client prints is passed through `vpn.WithProgress` (with the password blanked out) to the VPN step's detail text, so a
+slow connect shows what it is doing.
+
 ### Installing openconnect on Windows
 
 Admin, System offers an Install button for openconnect. It asks the elevated helper for one fixed job

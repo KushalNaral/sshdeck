@@ -240,6 +240,10 @@ func (a *App) vpnUp(ctx context.Context, v store.VPN, set func(string, func(*Ste
 	set("vpn", func(s *Step) { s.Status = "run" })
 	upCtx, cancel := context.WithTimeout(ctx, 60*time.Second)
 	defer cancel()
+	// Show what the client is saying, so a connect that is slow or stuck says why.
+	upCtx = vpn.WithProgress(upCtx, func(line string) {
+		set("vpn", func(s *Step) { s.Detail = v.Name + " · " + shorten(line, 90) })
+	})
 	if err := a.vpn.Up(upCtx, v, pw); err != nil {
 		set("vpn", func(s *Step) { s.Status = "fail" })
 		recovery := "Check the VPN user, password and gateway in Admin, then connect again."
@@ -253,9 +257,17 @@ func (a *App) vpnUp(ctx context.Context, v store.VPN, set func(string, func(*Ste
 		}
 		return fail(fmt.Sprintf("%s did not come up: %v", v.Name, err), recovery), true
 	}
-	set("vpn", func(s *Step) { s.Status, s.Ms = "done", time.Since(t).Milliseconds() })
+	set("vpn", func(s *Step) { s.Status, s.Ms, s.Detail = "done", time.Since(t).Milliseconds(), v.Name })
 	a.audit("vpn.up", v.Name, "")
 	return ConnectResult{}, false
+}
+
+// shorten cuts text to at most n characters, with an ellipsis.
+func shorten(s string, n int) string {
+	if r := []rune(s); len(r) > n {
+		return string(r[:n-1]) + "…"
+	}
+	return s
 }
 
 // serverSecret is the stored password, or for key login the key's passphrase, which may be empty (no passphrase, or ssh-agent).

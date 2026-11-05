@@ -242,12 +242,16 @@ func command(v store.VPN, secret string) (argv []string, stdin, ready string, st
 		if c := serverCertArg(v); c != "" {
 			argv = append(argv, "--servercert", c)
 		}
-		return append(argv, gw), secret + "\n", "Connected as", nil, cleanup, nil
+		return append(argv, gw), secret + "\n", openconnectReady, nil, cleanup, nil
 	case store.Hillstone:
 		return nil, "", "", nil, cleanup, ErrManual
 	}
 	return nil, "", "", nil, cleanup, fmt.Errorf("vpn: unknown client %q", v.Kind)
 }
+
+// openconnectReady is what openconnect prints once the tunnel is up: "Connected as" in older versions, "Configured as"
+// in current ones. "Connected to HTTPS" only means the TLS connection opened and is deliberately not matched.
+const openconnectReady = "Connected as|Configured as"
 
 // windowsCommand runs openconnect for both GlobalProtect and Fortinet. It is started by the elevated helper, so there
 // is no pkexec; the helper checks the command again before running it. The password goes on stdin.
@@ -265,11 +269,11 @@ func windowsCommand(v store.VPN, secret string) (argv []string, stdin, ready str
 	if v.Port != 443 {
 		server = fmt.Sprintf("%s:%d", v.Gateway, v.Port)
 	}
-	argv = []string{tool, proto, "--user", v.User, "--passwd-on-stdin"}
+	argv = []string{tool, proto, "--user", v.User, "--passwd-on-stdin", "--non-inter"}
 	if c := serverCertArg(v); c != "" {
 		argv = append(argv, "--servercert", c)
 	}
-	return append(argv, server), secret + "\n", "Connected as", nil, cleanup, nil
+	return append(argv, server), secret + "\n", openconnectReady, nil, cleanup, nil
 }
 
 // serverCertArg is the value for openconnect's --servercert: the fetched pin when there is one, else the stored
@@ -388,6 +392,39 @@ func (e *entry) current() State {
 // hand) is still running. That instance is stopped and the connect tried once more.
 const staleClient = "Another instance of the client is already running"
 
+type progressKey struct{}
+
+// WithProgress returns a context that makes Up report each line the client prints while connecting (with the
+// password blanked out), so the UI can show what a slow connect is doing.
+func WithProgress(ctx context.Context, fn func(line string)) context.Context {
+	return context.WithValue(ctx, progressKey{}, fn)
+}
+
+// Report passes a progress line to the callback in ctx, if there is one. Up calls it for each line the client prints.
+func Report(ctx context.Context, line string) {
+	if fn, ok := ctx.Value(progressKey{}).(func(string)); ok {
+		fn(line)
+	}
+}
+
+func redact(line, secret string) string {
+	if secret == "" {
+		return line
+	}
+	return strings.ReplaceAll(line, secret, "••••")
+}
+
+// readyMatch reports whether line says the tunnel is up. ready may list alternatives separated by "|": openconnect
+// says "Connected as" in older versions and "Configured as" in current ones.
+func readyMatch(line, ready string) bool {
+	for _, r := range strings.Split(ready, "|") {
+		if r != "" && strings.Contains(line, r) {
+			return true
+		}
+	}
+	return false
+}
+
 func (m *manager) Up(ctx context.Context, v store.VPN, secret string) error {
 	err := m.up(ctx, v, secret)
 	if err == nil || !strings.Contains(err.Error(), staleClient) {
@@ -459,8 +496,9 @@ func (m *manager) up(ctx context.Context, v store.VPN, secret string) error {
 				if tail = append(tail, line); len(tail) > 12 {
 					tail = tail[1:]
 				}
+				Report(ctx, redact(line, secret))
 			}
-			if ready != "" && strings.Contains(line, ready) {
+			if ready != "" && readyMatch(line, ready) {
 				m.setState(v.ID, e, Up)
 				go func() { // keep draining so the client never blocks on a full pipe; note when it dies
 					for range p.Lines() {

@@ -671,7 +671,7 @@ func TestWindowsGlobalProtectUsesOpenconnectDirectly(t *testing.T) {
 	if err := New(f).Up(ctx(t), gp, "hunter2"); err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"/Program Files/OpenConnect/openconnect.exe", "--protocol=gp", "--user", "support", "--passwd-on-stdin", "connect.example.gov"}
+	want := []string{"/Program Files/OpenConnect/openconnect.exe", "--protocol=gp", "--user", "support", "--passwd-on-stdin", "--non-inter", "connect.example.gov"}
 	if !slices.Equal(f.argv, want) {
 		t.Fatalf("argv %v\nwant %v", f.argv, want)
 	}
@@ -749,5 +749,72 @@ func TestOpenfortivpnRefusesAPinFormat(t *testing.T) {
 	err := New(&fakeStarter{script: printThenStay("Tunnel is up")}).Up(ctx(t), v, "pw")
 	if err == nil || !strings.Contains(err.Error(), "digest") {
 		t.Errorf("err = %v: openfortivpn needs the sha256 digest, not an openconnect pin", err)
+	}
+}
+
+func TestWindowsFortinetIsUpOnConfiguredAs(t *testing.T) {
+	asWindows(t)
+	// openconnect 9.x says "Configured as", not "Connected as", once the tunnel exists; the Fortinet protocol too.
+	f := &fakeStarter{script: printThenStay(
+		"Connected to HTTPS on vpn.example.org:10443 with ciphersuite (TLS1.2)-(ECDHE-RSA)-(AES-256-GCM)",
+		"Configured as 10.212.134.200, with SSL connected and DTLS disabled")}
+	m := New(f)
+	if err := m.Up(ctx(t), forti, "pw"); err != nil {
+		t.Fatal(err)
+	}
+	if m.Status(forti.ID) != Up {
+		t.Errorf("status %v, want up once the client says Configured as", m.Status(forti.ID))
+	}
+}
+
+func TestConnectedToHTTPSIsNotTheTunnel(t *testing.T) {
+	asWindows(t)
+	f := &fakeStarter{script: printThenStay("Connected to HTTPS on vpn.example.org:443 with ciphersuite X")}
+	c, cancel := context.WithTimeout(context.Background(), 150*time.Millisecond)
+	defer cancel()
+	if err := New(f).Up(c, forti, "pw"); err == nil {
+		t.Error("the TLS connection alone must not count as the VPN being up")
+	}
+}
+
+func TestWindowsOpenconnectNeverWaitsForAPrompt(t *testing.T) {
+	asWindows(t)
+	f := &fakeStarter{script: printThenStay("Configured as 10.0.0.2")}
+	if err := New(f).Up(ctx(t), gp, "pw"); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Contains(f.argv, "--non-inter") {
+		t.Errorf("argv %v: without --non-inter an unknown certificate makes openconnect wait for an answer nobody can give", f.argv)
+	}
+	if err := validateOpenconnectArgs(f.argv[1:]); err != nil {
+		t.Errorf("the helper would refuse our own command: %v", err)
+	}
+}
+
+func TestProgressLinesAreReportedWhileConnecting(t *testing.T) {
+	var got []string
+	c := WithProgress(ctx(t), func(line string) { got = append(got, line) })
+	f := &fakeStarter{script: printThenStay("Attempting to connect to server 203.0.113.50:10443", "", "Configured as 10.0.0.2, with SSL connected")}
+	asWindows(t)
+	if err := New(f).Up(c, forti, "pw"); err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 || got[0] != "Attempting to connect to server 203.0.113.50:10443" {
+		t.Errorf("progress = %v, want the client's non-empty lines in order", got)
+	}
+}
+
+func TestProgressNeverCarriesThePassword(t *testing.T) {
+	var got []string
+	c := WithProgress(ctx(t), func(line string) { got = append(got, line) })
+	f := &fakeStarter{script: printThenStay("POST https://vpn.example.org/remote/logincheck user=me credential=hunter2", "Configured as 10.0.0.2")}
+	asWindows(t)
+	if err := New(f).Up(c, forti, "hunter2"); err != nil {
+		t.Fatal(err)
+	}
+	for _, l := range got {
+		if strings.Contains(l, "hunter2") {
+			t.Errorf("a progress line contains the password: %q", l)
+		}
 	}
 }

@@ -335,6 +335,8 @@ func validateOpenconnectArgs(args []string) error {
 			proto = a
 		case a == "--passwd-on-stdin":
 			stdin = true
+		case a == "--non-inter":
+			// never wait for an answer: nobody can type one into a hidden process
 		case a == "--user" || a == "--servercert":
 			if i+1 >= len(args) {
 				return fmt.Errorf("%s needs a value", a)

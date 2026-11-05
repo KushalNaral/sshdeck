@@ -34,7 +34,9 @@ type fakeVPN struct {
 	dead bool // Status reports Down until the next Up
 }
 
-func (f *fakeVPN) Up(_ context.Context, v store.VPN, _ string) error {
+func (f *fakeVPN) Up(ctx context.Context, v store.VPN, _ string) error {
+	vpn.Report(ctx, "Attempting to connect to server")
+	vpn.Report(ctx, "Configured as 10.0.0.2")
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.up = append(f.up, v.ID)
