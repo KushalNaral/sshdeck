@@ -203,6 +203,28 @@ handles both protocols there (`--protocol=gp` and `--protocol=fortinet`). A cert
 The protocol, the allow-list and the process handling are ordinary Go and are tested on Linux; only the elevated launch
 is Windows-only, and the whole path has not been run against a real gateway.
 
+### Installing openconnect on Windows
+
+Admin, System offers an Install button for openconnect. It asks the elevated helper for one fixed job
+(`sshdeck:install-openconnect`, `internal/vpn/install.go`): download the OpenConnect-GUI installer from the maintainers'
+site, check it against a SHA-256 compiled into the app, run it silently (`/S`), and confirm that `openconnect.exe` is
+where sshdeck looks. The job has no parameters and the helper refuses it with arguments, so the token cannot be used to
+install anything else. The download is checked before it is written, then run from a folder under `%ProgramData%` that
+ordinary users cannot modify. To move to a newer installer, download and check it, then change the URL and hash.
+
+### Updates
+
+`internal/update` asks the GitHub releases API for the newest release (stable builds only see stable releases; a
+pre-release build also sees newer pre-releases). Installing downloads the archive for this system, then requires that
+`SHA256SUMS` carries a valid ed25519 signature (`SHA256SUMS.sig`, made by `cmd/sign` in the release workflow from the
+`UPDATE_SIGNING_KEY` secret) and that the archive matches the signed checksum. The public key is compiled in
+(`internal/update/key.go`). Only a member named `sshdeck` (`sshdeck.exe`) is taken from the archive and it is written
+next to the running program, so the swap is a rename: directly on Linux, and on Windows by renaming the running exe to
+`sshdeck.exe.old`, which is deleted at the next start. A release without a signature is never installed by itself. The
+check needs the repository to be public, and a development build (`version == "dev"`) never checks. The version is set
+with `-ldflags "-X main.version=..."`. Losing the private key means the next release must be installed by hand and the
+embedded key replaced; a backup is kept outside the repository.
+
 ## 7. SSH details
 
 - **Auth:** password, a private key file (its passphrase, if any, is the stored secret), or the running

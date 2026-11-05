@@ -17,6 +17,7 @@ import (
 	"github.com/KushalNaral/sshdeck/internal/audit"
 	"github.com/KushalNaral/sshdeck/internal/sshx"
 	"github.com/KushalNaral/sshdeck/internal/store"
+	"github.com/KushalNaral/sshdeck/internal/update"
 	"github.com/KushalNaral/sshdeck/internal/vpn"
 )
 
@@ -25,7 +26,11 @@ type App struct {
 	ctx     context.Context
 	st      *store.Store
 	vpn     vpn.Manager
-	starter vpn.Starter // what runs VPN clients; closed at shutdown (on Windows that ends the elevated helper)
+	version string // the running release, "dev" for a development build
+	// The update steps, replaceable in tests.
+	updCheck   func(context.Context) (update.Info, error)
+	updInstall func(context.Context, update.Info) error
+	starter    vpn.Starter // what runs VPN clients; closed at shutdown (on Windows that ends the elevated helper)
 
 	// Seams so tests can run without a window or a network.
 	emit     func(name string, data ...any)
@@ -100,13 +105,16 @@ func NewApp() (*App, error) {
 }
 
 func newApp(st *store.Store, m vpn.Manager, dial func(context.Context, store.Server, string) (sshx.Client, error)) *App {
-	return &App{
+	a := &App{
 		ctx: context.Background(), st: st, vpn: m, dial: dial, lookPath: vpn.LookPath,
 		emit: func(string, ...any) {}, audit: func(string, string, string) {},
 		clipSet: func(string) error { return nil }, clipGet: func() (string, error) { return "", nil }, clipTTL: clipboardTTL,
 		secrets: store.Keyring{}, clock: time.Now, vpnPoll: 5 * time.Second, backoff: []time.Duration{2 * time.Second, 4 * time.Second, 8 * time.Second, 16 * time.Second, 30 * time.Second}, settings: defaultSettings(), lastActive: time.Now(),
-		conns: map[string]*conn{}, cancels: map[string]func(){}, manual: map[string]chan struct{}{},
+		conns: map[string]*conn{}, cancels: map[string]func(){}, manual: map[string]chan struct{}{}, version: version,
 	}
+	a.updCheck = func(ctx context.Context) (update.Info, error) { return a.updater().Check(ctx) }
+	a.updInstall = a.realInstall
+	return a
 }
 
 // secondLaunch runs in the first copy when the user starts sshdeck again: show the window instead.
@@ -117,6 +125,10 @@ func (a *App) secondLaunch(options.SecondInstanceData) {
 
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
+	if exe, err := exePath(); err == nil {
+		update.CleanupOld(exe) // the previous program left behind by a Windows update
+	}
+	a.checkUpdateOnStart(5 * time.Second)
 	a.audit("app.start", "", "")
 	go a.idleLoop(ctx)
 }

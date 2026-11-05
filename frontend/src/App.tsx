@@ -8,6 +8,7 @@ import { Connection } from './components/Connection'
 import { Mark } from './components/Mark'
 import { Analysis } from './components/Analysis'
 import { Logins } from './components/Logins'
+import { updateApi, type UpdateInfo } from './lib/update'
 import { ConnectBar } from './components/ConnectBar'
 import { TasksBoard } from './components/TasksBoard'
 import { Palette } from './components/Palette'
@@ -34,6 +35,12 @@ export default function App() {
   const [scanning, setScanning] = useState<string | null>(null)
   const [scanErrors, setScanErrors] = useState<Record<string, string>>({})
   const [palette, setPalette] = useState(false)
+  const [newer, setNewer] = useState<UpdateInfo | null>(null) // the startup check found a newer release
+  const [adminTab, setAdminTab] = useState<'system' | undefined>(undefined)
+  useEffect(() => updateApi.onAvailable(setNewer), [])
+  useEffect(() => {
+    if (mode !== 'admin') setAdminTab(undefined)
+  }, [mode])
   const [ask, setAsk] = useState<{ title: string; body: string; label: string; run: () => void; cancelled?: () => void } | null>(null)
   const [theme, setTheme] = useState(loadTheme)
   const cycleTheme = () => {
@@ -346,6 +353,11 @@ export default function App() {
             <kbd>Ctrl 1</kbd> <kbd>2</kbd> <kbd>3</kbd> Job
           </span>
         </div>
+        {newer && (
+          <button className="btn solid" onClick={() => (setAdminTab('system'), setMode('admin'))} title="A newer version is available">
+            Update {newer.latest}
+          </button>
+        )}
         {lock.enabled && (
           <button className="btn themebtn" onClick={() => void lockApi.lock()} title="Lock now (Ctrl L)">
             Lock
@@ -409,7 +421,7 @@ export default function App() {
 
       {mode === 'admin' && (
         <main className="stage">
-          <Admin servers={servers} vpns={vpns} lock={lock} onLockChange={setLock} onSaveServer={saveServer} onDeleteServer={deleteServer} onSaveVpn={saveVpn} onDeleteVpn={deleteVpn} onSaveLogin={saveLogin} onDeleteLogin={deleteLogin} onImported={() => void configStore.load().then(setConfig).catch((e) => setLoadError(messageOf(e)))} />
+          <Admin servers={servers} vpns={vpns} lock={lock} onLockChange={setLock} onSaveServer={saveServer} onDeleteServer={deleteServer} onSaveVpn={saveVpn} onDeleteVpn={deleteVpn} onSaveLogin={saveLogin} onDeleteLogin={deleteLogin} startTab={adminTab} onImported={() => void configStore.load().then(setConfig).catch((e) => setLoadError(messageOf(e)))} />
         </main>
       )}
 

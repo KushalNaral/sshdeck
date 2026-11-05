@@ -12,6 +12,8 @@ type Settings struct {
 	// NoReconnect turns off redialling a dropped connection. It is stored inverted so a settings file written
 	// before this option existed still means "on".
 	NoReconnect bool `json:"noAutoReconnect,omitempty"`
+	// NoUpdateCheck turns off the look for a newer release at startup. Stored inverted, like NoReconnect.
+	NoUpdateCheck bool `json:"noUpdateCheck,omitempty"`
 }
 
 func defaultSettings() Settings { return Settings{IdleMinutes: 15} }

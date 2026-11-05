@@ -7,6 +7,7 @@ import { ImportPanel } from './ImportPanel'
 import { LoginsEditor } from './LoginsEditor'
 import { ReconnectSetting, SecurityPanel } from './SecurityPanel'
 import { SystemPanel } from './SystemPanel'
+import { UpdatePanel } from './UpdatePanel'
 import type { LockState } from '../lib/lock'
 import { Mark } from './Mark'
 
@@ -25,6 +26,8 @@ interface Props {
   onDeleteLogin: (serverId: string, id: string) => Promise<string | null>
   /** The CSV import changed the stored data: load it again. */
   onImported: () => void
+  /** Open on this tab instead of Servers. */
+  startTab?: Tab
 }
 
 const portOk = (p: number) => Number.isInteger(p) && p >= 1 && p <= 65535
@@ -216,8 +219,8 @@ function VpnForm({ initial, isNew, onSave, onCancel, onDelete }: { initial: Vpn;
 }
 
 /** Set everything up here: servers, VPN profiles and their credentials. */
-export function Admin({ servers, vpns, lock, onLockChange, onSaveServer, onDeleteServer, onSaveVpn, onDeleteVpn, onSaveLogin, onDeleteLogin, onImported }: Props) {
-  const [tab, setTab] = useState<Tab>('servers')
+export function Admin({ servers, vpns, lock, onLockChange, onSaveServer, onDeleteServer, onSaveVpn, onDeleteVpn, onSaveLogin, onDeleteLogin, onImported, startTab }: Props) {
+  const [tab, setTab] = useState<Tab>(startTab ?? 'servers')
   const [editing, setEditing] = useState<string | null>(null) // id, 'new', or null
   const [copyOf, setCopyOf] = useState<Server | null>(null) // a new server starts from this one
 
@@ -239,7 +242,12 @@ export function Admin({ servers, vpns, lock, onLockChange, onSaveServer, onDelet
       </div>
 
       {tab === 'import' && <ImportPanel onImported={onImported} />}
-      {tab === 'system' && <SystemPanel />}
+      {tab === 'system' && (
+        <>
+          <UpdatePanel />
+          <SystemPanel />
+        </>
+      )}
       {tab === 'security' && (
         <>
           <ReconnectSetting lock={lock} onChange={onLockChange} />

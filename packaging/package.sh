@@ -1,6 +1,7 @@
 #!/bin/sh
 # Builds a release and wraps it as dist/sshdeck-<version>-linux-amd64.tar.gz.
 #   WAILS=~/go/bin/wails   path to the wails CLI
+#   UPDATE_SIGNING_KEY=<base64>  also writes dist/SHA256SUMS.sig, which the in-app updater requires (see cmd/sign)
 #   SIGN_KEY=<gpg key id>  also writes dist/SHA256SUMS.asc, a detached signature over the checksums
 #   SKIP_AUDIT=1           skip the dependency vulnerability check (not recommended)
 # The build never passes -devtools, so the shipped app has no inspector. Needs libwebkit2gtk-4.1 and libgtk-3 to run.
@@ -8,7 +9,7 @@ set -e
 cd "$(dirname "$0")/.."
 [ -n "$SKIP_AUDIT" ] || ./packaging/audit.sh
 v=${1:-$(git describe --tags --always --dirty)}
-${WAILS:-wails} build -tags webkit2_41 -clean
+${WAILS:-wails} build -tags webkit2_41 -clean -ldflags "-X main.version=$v"
 d=dist/sshdeck-$v-linux-amd64
 rm -rf "$d" && mkdir -p "$d"
 cp build/bin/sshdeck packaging/sshdeck.desktop packaging/sshdeck.svg "$d"
@@ -27,5 +28,6 @@ INS
 chmod +x "$d/install.sh"
 tar -C dist -czf "$d.tar.gz" "$(basename "$d")"
 (cd dist && sha256sum "$(basename "$d").tar.gz" > SHA256SUMS)
+[ -z "$UPDATE_SIGNING_KEY" ] || go run ./cmd/sign sign dist/SHA256SUMS
 [ -z "$SIGN_KEY" ] || gpg --local-user "$SIGN_KEY" --armor --detach-sign --yes -o dist/SHA256SUMS.asc dist/SHA256SUMS
 echo "$d.tar.gz   (checksum: dist/SHA256SUMS${SIGN_KEY:+, signature: dist/SHA256SUMS.asc})"

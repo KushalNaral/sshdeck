@@ -172,6 +172,20 @@ export namespace main {
 	        this.autoReconnect = source["autoReconnect"];
 	    }
 	}
+	export class UpdateStatus {
+	    version: string;
+	    autoCheck: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new UpdateStatus(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.version = source["version"];
+	        this.autoCheck = source["autoCheck"];
+	    }
+	}
 
 }
 
@@ -427,6 +441,33 @@ export namespace store {
 	        this.user = source["user"];
 	        this.note = source["note"];
 	        this.trustedCert = source["trustedCert"];
+	    }
+	}
+
+}
+
+export namespace update {
+	
+	export class Info {
+	    current: string;
+	    latest: string;
+	    available: boolean;
+	    notes: string;
+	    pageUrl: string;
+	    canInstall: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new Info(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.current = source["current"];
+	        this.latest = source["latest"];
+	        this.available = source["available"];
+	        this.notes = source["notes"];
+	        this.pageUrl = source["pageUrl"];
+	        this.canInstall = source["canInstall"];
 	    }
 	}
 

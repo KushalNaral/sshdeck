@@ -296,7 +296,7 @@ func RunHelperWith(addr, token string, s Starter, allow func(argv []string) erro
 
 // RunHelper is what "sshdeck --vpn-helper ADDR TOKEN" runs. It returns the process exit code.
 func RunHelper(addr, token string) int {
-	if err := RunHelperWith(addr, token, ExecStarter{}, allowOpenconnect); err != nil {
+	if err := RunHelperWith(addr, token, &helperExec{inner: ExecStarter{}, install: defaultInstall}, allowHelper); err != nil {
 		fmt.Fprintln(os.Stderr, "sshdeck vpn helper:", err)
 		return 1
 	}

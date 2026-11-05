@@ -36,9 +36,12 @@ This checks the files against `SHA256SUMS` and installs into `~/.local/bin` for 
 the VPN clients that are missing and installs them. Starting a VPN asks for your password through `pkexec`.
 
 On Windows, unzip `sshdeck-v*-windows-amd64.zip` and run `sshdeck.exe` (it needs the WebView2 runtime, which Windows 10
-and 11 already have). For VPNs install [OpenConnect](https://gitlab.com/openconnect/openconnect-gui/-/releases) for all
-users; it handles both GlobalProtect and FortiClient. The first VPN you start in a session asks for administrator
-approval (UAC); after that sshdeck reconnects without asking again. Hillstone is still connected by hand.
+and 11 already have). For VPNs, Admin, System has an Install button for OpenConnect, which handles both GlobalProtect
+and FortiClient. The first VPN you start in a session asks for administrator approval (UAC); after that sshdeck
+reconnects without asking again. Hillstone is still connected by hand.
+
+sshdeck checks GitHub for a newer release when it starts and shows an Update button; Admin, System also has a
+"Check for updates" button and a switch for the startup check. Updates are signed and verified before they are installed.
 
 ## Usage
 

@@ -22,6 +22,10 @@ export function CheckDependencies() {
   return window['go']['main']['App']['CheckDependencies']();
 }
 
+export function CheckUpdate() {
+  return window['go']['main']['App']['CheckUpdate']();
+}
+
 export function CloseShell(arg1, arg2) {
   return window['go']['main']['App']['CloseShell'](arg1, arg2);
 }
@@ -78,6 +82,10 @@ export function InstallDependencies(arg1) {
   return window['go']['main']['App']['InstallDependencies'](arg1);
 }
 
+export function InstallUpdate() {
+  return window['go']['main']['App']['InstallUpdate']();
+}
+
 export function ListAudit(arg1) {
   return window['go']['main']['App']['ListAudit'](arg1);
 }
@@ -114,6 +122,10 @@ export function RecordConfirm(arg1, arg2) {
   return window['go']['main']['App']['RecordConfirm'](arg1, arg2);
 }
 
+export function RestartApp() {
+  return window['go']['main']['App']['RestartApp']();
+}
+
 export function SaveLogin(arg1, arg2, arg3) {
   return window['go']['main']['App']['SaveLogin'](arg1, arg2, arg3);
 }
@@ -138,6 +150,10 @@ export function SetAutoReconnect(arg1) {
   return window['go']['main']['App']['SetAutoReconnect'](arg1);
 }
 
+export function SetAutoUpdateCheck(arg1) {
+  return window['go']['main']['App']['SetAutoUpdateCheck'](arg1);
+}
+
 export function SetLockSettings(arg1, arg2) {
   return window['go']['main']['App']['SetLockSettings'](arg1, arg2);
 }
@@ -156,6 +172,10 @@ export function Touch() {
 
 export function Unlock(arg1) {
   return window['go']['main']['App']['Unlock'](arg1);
+}
+
+export function UpdateStatus() {
+  return window['go']['main']['App']['UpdateStatus']();
 }
 
 export function VerifyAudit() {

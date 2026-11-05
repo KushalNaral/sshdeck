@@ -58,7 +58,7 @@ export function SystemPanel() {
         <button className="btn solid" disabled={busy || missing.length === 0} onClick={() => void install(missing.map((d) => d.name))}>
           {busy ? 'Installing…' : missing.length ? `Install ${missing.length} missing` : 'Everything is installed'}
         </button>
-        <span className="dim">Your system will ask for your admin password.</span>
+        <span className="dim">Your system will ask for administrator approval.</span>
       </div>
       {err && <p className="bad" role="alert">{err}</p>}
       {log.length > 0 && <pre className="deplog" aria-label="Install output">{log.join('\n')}</pre>}
