@@ -59,6 +59,15 @@ export const mockFiles: FilesApi = {
   async containers() {
     return ['app', 'queue-worker', 'redis']
   },
+  async search(_s, dir, query, byContent) {
+    await new Promise((r) => setTimeout(r, 150))
+    return byContent
+      ? [
+          { path: `${dir}/conf/nginx.conf`, line: 12, text: `server_name ${query}.example.org;` },
+          { path: `${dir}/app/.env`, line: 3, text: `APP_HOST=${query}` },
+        ]
+      : [{ path: `${dir}/conf/${query}.conf` }, { path: `${dir}/logs/${query}.log` }]
+  },
   async list(_s, dir) {
     await sleep(120)
     const d = dir || '/home/deploy'

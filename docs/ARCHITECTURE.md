@@ -52,6 +52,7 @@ process is in Go. The UI asks, Go acts, and Go pushes progress back as events.
 | `internal/vpn` | Start and stop VPN client processes and watch their output | `Manager`, `Starter`, `Proc`, `CertError` |
 | `internal/probe` | Run read-only commands and parse them into a report | `Analyze`, `Report`, `Run` |
 | `internal/history` | Versions of edited files: sealed storage, pruning, and the shared copy on the server | `Store`, `Version`, `WriteRemote`, `ListRemote` |
+| `run.go`, `search.go`, `logs.go` | One command on several servers, search under a folder, followed logs | `RunOn`, `SearchFiles`, `StartLog` |
 | `tunnels.go`, `jump.go` | Saved port forwards on a connected server; logging in through jump hosts and picking the VPN for a chain | `StartTunnel`, `dialServer`, `vpnFor` |
 | `internal/importer` | Parse the CSV, an OpenSSH config, and the master `.ods` project list | `ParseCSV`, `ParseSSHConfig`, `ReadODS` |
 | `frontend/src` | The UI (see section 8) | `Backend` interface |
@@ -267,6 +268,25 @@ normal handshake over it. Closing the target closes its hops. The store refuses 
 longer than three, and refuses to delete a server that others jump through. The VPN comes from the server itself,
 otherwise from the nearest jump host that has one, and the route check probes the host that is actually dialled.
 
+### Running on several servers
+
+`RunOn(serverIDs, command)` runs one command on the servers that already have a connection, four at a time, each with a
+five-minute limit, and returns a run id. Results arrive as `run:<id>` events, one `RunResult` per server (state, exit
+code, output, time). The command runs as `( command ) 2>&1; printf <marker> $?`: the subshell keeps an `exit` in the command
+from skipping the marker, stderr joins stdout, and the marker is how the exit code comes back, because `Exec` reports a
+failure as the error text. Output keeps its last 256 KB. A server without a connection is reported as skipped and never
+dialled, so the VPN and production questions stay in the normal connect flow; the production question for a run is asked
+in the UI. Saved commands are `store.Snippet`, kept in the same data file (and so inside the vault when the lock is on).
+
+### Search, terminal here, logs
+
+`SearchFiles` runs `find` or `grep -F` with the folder and the term passed as `$1` and `$2` of a fixed script (the same
+rule as the container file backend), on the server or through `docker exec`, and keeps at most 500 hits. "Terminal here"
+opens a tab and types `cd -- 'dir'` once the shell is attached. `StartLog` follows `journalctl`, `docker logs` or
+`tail -F` through `Client.Exec` and sends the lines in batches (at most ten a second, a partial line held until its
+newline) as `log:<id>` events; `StopLog`, `Disconnect` or the connection ending closes it. The log tab keeps the last
+10,000 lines in the browser.
+
 ### Two VPNs at once
 
 Two VPN clients usually fight over routes and DNS. Before connecting, the UI looks for another VPN that has a live or
@@ -431,6 +451,7 @@ due dates), **Admin** (servers, VPN profiles, System, Security, Audit).
 | `probe` | Golden command outputs for Ubuntu 22.04 with Docker and CentOS 7 without |
 | `store` | Temp directory plus an in-memory `Secrets` |
 | `App` | Fakes for `dial`, `lookPath`, the VPN manager, audit and events; covers steps, Hillstone, shared VPN, cancel, lock and idle, audit, shutdown, container commands, dependencies |
+| `run`, `search`, `logs` | Commands are run in a local shell through a fake client, so quoting, the exit marker, output cap, concurrency limit, cancel and line batching are exercised for real |
 | `importer` | Parsing helpers; SSH config with wildcards, `Host *` defaults, quotes, ProxyJump |
 | Frontend | `vitest` for pure logic (`lib/version.ts`); the UI is checked by eye in the browser |
 
@@ -499,5 +520,6 @@ memory while in use.
   read-only to the login.
 - Files: no resume for interrupted transfers, no permission editing, no symlink creation, and files over 2 MB
   cannot be edited in the app. The editor has no language servers.
+- Run: only servers that are already connected, and no per-server input. Search needs `find` and `grep` on the target. Logs need `journalctl` (and rights to read it) or `tail`.
 - Tunnels: no dynamic (SOCKS) forwards. SSH config import skips `Include` and `Match`, and takes only the first `IdentityFile` and the first `ProxyJump` hop.
 - Organisation mode (central inventory, OIDC, per-user access) is designed in [ORG-MODE.md](ORG-MODE.md), not built.

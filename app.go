@@ -48,6 +48,12 @@ type App struct {
 	// File transfers (files.go).
 	xmu         sync.Mutex
 	xfers       []*xfer
+	lmu         sync.Mutex        // guards logs
+	logs        map[string]logRun // logs being followed
+	logSeq      int
+	rmu         sync.Mutex           // guards runs
+	runs        map[string]*runState // recent multi-server runs
+	runSeq      int
 	tmu         sync.Mutex            // guards tuns
 	tuns        map[string]*tunnelRun // running tunnels, by serverID/tunnelID
 	cfs         map[string]cfsEntry   // how each container's files are reached (files.go)
@@ -131,7 +137,7 @@ func newApp(st *store.Store, m vpn.Manager, dial func(context.Context, store.Ser
 		emit: func(string, ...any) {}, xsem: make(chan struct{}, 3), audit: func(string, string, string) {},
 		clipSet: func(string) error { return nil }, clipGet: func() (string, error) { return "", nil }, clipTTL: clipboardTTL,
 		secrets: store.Keyring{}, clock: time.Now, vpnPoll: 5 * time.Second, backoff: []time.Duration{2 * time.Second, 4 * time.Second, 8 * time.Second, 16 * time.Second, 30 * time.Second}, settings: defaultSettings(), lastActive: time.Now(),
-		conns: map[string]*conn{}, tuns: map[string]*tunnelRun{}, cancels: map[string]func(){}, manual: map[string]chan struct{}{}, version: version, dialThrough: sshx.DialThrough,
+		conns: map[string]*conn{}, tuns: map[string]*tunnelRun{}, runs: map[string]*runState{}, logs: map[string]logRun{}, cancels: map[string]func(){}, manual: map[string]chan struct{}{}, version: version, dialThrough: sshx.DialThrough,
 		probe: probeTCP, routeWait: 30 * time.Second, routePoll: 700 * time.Millisecond,
 	}
 	a.updCheck = func(ctx context.Context) (update.Info, error) { return a.updater().Check(ctx) }
@@ -253,6 +259,10 @@ func (a *App) DeleteTask(id string) error {
 	}
 	return err
 }
+
+func (a *App) ListSnippets() []store.Snippet                      { return a.st.Snippets() }
+func (a *App) SaveSnippet(n store.Snippet) (store.Snippet, error) { return a.st.SaveSnippet(n) }
+func (a *App) DeleteSnippet(id string) error                      { return a.st.DeleteSnippet(id) }
 
 // beforeClose asks before closing a window that still has connections, since closing ends their shells and VPNs.
 func (a *App) beforeClose(ctx context.Context) (prevent bool) {

@@ -16,6 +16,8 @@ interface Props {
   live: boolean
   /** Counts up each time something asks for this file's history to open. */
   historyAsk: number
+  /** Jump to this line once the file is loaded. n counts up so asking for the same line again still scrolls. */
+  lineAsk?: { line: number; n: number }
   onCopy: (mode: '' | 'on' | 'off') => void
   path: string
   backend: Backend
@@ -26,7 +28,7 @@ interface Props {
 type Conflict = 'changed' | null
 
 /** One file open in Monaco. It stays mounted (hidden) while another tab is in front, so edits and undo history survive. */
-export function Editor({ target, server, live, historyAsk, onCopy, path, backend, visible, onDirty }: Props) {
+export function Editor({ target, server, live, historyAsk, lineAsk, onCopy, path, backend, visible, onDirty }: Props) {
   const serverId = server.id
   const host = useRef<HTMLDivElement>(null)
   const ed = useRef<Monaco.editor.IStandaloneCodeEditor | null>(null)
@@ -83,6 +85,14 @@ export function Editor({ target, server, live, historyAsk, onCopy, path, backend
   )
   const saveRef = useRef(save)
   saveRef.current = save
+  const wantLine = useRef(0)
+  const reveal = useCallback(() => {
+    const e = ed.current
+    if (!e || !wantLine.current) return
+    e.revealLineInCenter(wantLine.current)
+    e.setPosition({ lineNumber: wantLine.current, column: 1 })
+    wantLine.current = 0
+  }, [])
 
   const load = useCallback(async () => {
     setState('loading')
@@ -118,12 +128,19 @@ export function Editor({ target, server, live, historyAsk, onCopy, path, backend
       }
       setConflict(null)
       setState('ready')
+      reveal()
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
       setState('error')
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [backend, path, serverId])
+  }, [backend, path, serverId, reveal])
+
+  useEffect(() => {
+    if (!lineAsk) return
+    wantLine.current = lineAsk.line
+    reveal() // already loaded; otherwise load() does it
+  }, [lineAsk, reveal])
 
   useEffect(() => {
     void load()

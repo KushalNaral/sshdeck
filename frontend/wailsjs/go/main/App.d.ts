@@ -14,6 +14,8 @@ export function ApplyImport(arg1:string,arg2:Array<number>):Promise<main.ImportR
 
 export function AttachShell(arg1:string,arg2:number,arg3:number,arg4:number):Promise<void>;
 
+export function CancelRun(arg1:string):Promise<void>;
+
 export function CancelTransfer(arg1:string):Promise<void>;
 
 export function ChangePassphrase(arg1:string,arg2:string):Promise<void>;
@@ -43,6 +45,8 @@ export function DeleteHistory(arg1:string,arg2:string):Promise<void>;
 export function DeleteLogin(arg1:string,arg2:string):Promise<void>;
 
 export function DeleteServer(arg1:string):Promise<void>;
+
+export function DeleteSnippet(arg1:string):Promise<void>;
 
 export function DeleteTask(arg1:string):Promise<void>;
 
@@ -75,6 +79,8 @@ export function ListAudit(arg1:number):Promise<Array<audit.Entry>>;
 export function ListDir(arg1:string,arg2:string):Promise<main.Listing>;
 
 export function ListServers():Promise<Array<store.Server>>;
+
+export function ListSnippets():Promise<Array<store.Snippet>>;
 
 export function ListTasks():Promise<Array<store.Task>>;
 
@@ -112,15 +118,23 @@ export function RestoreVersion(arg1:string,arg2:string,arg3:string):Promise<stri
 
 export function RetryTransfer(arg1:string):Promise<void>;
 
+export function RunOn(arg1:Array<string>,arg2:string):Promise<string>;
+
+export function RunResults(arg1:string):Promise<Array<main.RunResult>>;
+
 export function SaveLogin(arg1:string,arg2:store.Login,arg3:string):Promise<store.Login>;
 
 export function SaveServer(arg1:store.Server,arg2:string):Promise<store.Server>;
+
+export function SaveSnippet(arg1:store.Snippet):Promise<store.Snippet>;
 
 export function SaveTask(arg1:store.Task):Promise<store.Task>;
 
 export function SaveTemplate():Promise<string>;
 
 export function SaveVPN(arg1:store.VPN,arg2:string):Promise<store.VPN>;
+
+export function SearchFiles(arg1:string,arg2:string,arg3:string,arg4:boolean):Promise<Array<main.SearchHit>>;
 
 export function ServerHistory(arg1:string,arg2:number):Promise<Array<history.Version>>;
 
@@ -134,7 +148,11 @@ export function SetHistorySettings(arg1:main.HistorySettings):Promise<void>;
 
 export function SetLockSettings(arg1:number,arg2:boolean):Promise<void>;
 
+export function StartLog(arg1:string,arg2:string,arg3:string):Promise<string>;
+
 export function StartTunnel(arg1:string,arg2:string):Promise<void>;
+
+export function StopLog(arg1:string):Promise<void>;
 
 export function StopTunnel(arg1:string,arg2:string):Promise<void>;
 

@@ -1640,6 +1640,7 @@ tbody tr:hover td {
   display: flex;
   align-items: center;
   gap: 3px;
+  flex-wrap: wrap;
   padding: 4px 5px;
   background: var(--cmd);
   border-bottom: 1px solid var(--cmd-line);
@@ -2438,4 +2439,287 @@ progress::-webkit-progress-value {
 .tunnels .addr {
   font-size: 11px;
   overflow-wrap: anywhere;
+}
+
+/* Run view */
+.runview {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: minmax(240px, 320px) 1fr;
+  gap: 12px;
+  padding: 12px;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--pane);
+}
+.run-servers,
+.run-main {
+  min-height: 0;
+  overflow: auto;
+  display: grid;
+  align-content: start;
+  gap: 8px;
+}
+.run-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  border: 1px solid var(--pane-line);
+  max-height: 55vh;
+  overflow: auto;
+}
+.run-list label {
+  display: grid;
+  grid-template-columns: auto auto 1fr;
+  gap: 6px;
+  align-items: center;
+  padding: 3px 6px;
+  cursor: pointer;
+}
+.run-list label:hover {
+  background: var(--hov);
+}
+.run-list .dim {
+  grid-column: 3;
+  font-size: var(--t-sm);
+}
+.run-name .tag {
+  color: var(--dim);
+  font-size: var(--t-sm);
+}
+.run-bar {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.run-name-box {
+  display: inline-flex;
+  gap: 4px;
+}
+.run-cmd {
+  width: 100%;
+  font-family: ui-monospace, 'Cascadia Mono', Consolas, monospace;
+  font-size: var(--t-sm);
+  resize: vertical;
+  box-sizing: border-box;
+}
+.run-only {
+  display: inline-flex;
+  gap: 4px;
+  align-items: center;
+}
+.run-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+  gap: 8px;
+  align-items: start;
+}
+.run-card {
+  border: 1px solid var(--pane-line);
+  border-left-width: 4px;
+  background: var(--pane);
+  min-width: 0;
+}
+.run-card.done {
+  border-left-color: #3a7d3a;
+}
+.run-card.failed {
+  border-left-color: #b3261e;
+}
+.run-card.skipped,
+.run-card.cancelled {
+  border-left-color: var(--pane-line);
+}
+.run-card header {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  padding: 4px 8px;
+  background: var(--cmd);
+  border-bottom: 1px solid var(--cmd-line);
+}
+.run-card header .dim {
+  flex: 1;
+}
+.run-card pre {
+  margin: 0;
+  padding: 6px 8px;
+  max-height: 260px;
+  overflow: auto;
+  font-size: var(--t-sm);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.run-card p {
+  margin: 4px 8px;
+}
+.snip-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 4px;
+}
+.snip-list li {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+}
+.snip-list code {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+select.snip {
+  margin-left: auto;
+}
+
+/* Text boxes outside a .field */
+.field textarea,
+.run-cmd,
+.runview select,
+.runview input:not([type='checkbox']),
+select.snip {
+  box-sizing: border-box;
+  padding: 3px var(--u);
+  border: 1px solid var(--input-line);
+  border-top-color: #7f8da0;
+  background: var(--pane);
+  color: var(--ink);
+  font: inherit;
+  min-width: 0;
+}
+.field textarea,
+.run-cmd {
+  width: 100%;
+  font-family: ui-monospace, 'Cascadia Mono', Consolas, monospace;
+  font-size: var(--t-sm);
+}
+.field textarea:focus-visible,
+.run-cmd:focus-visible,
+.runview select:focus-visible,
+.runview input:focus-visible,
+select.snip:focus-visible {
+  outline: none;
+  border-color: var(--glow);
+  box-shadow: 0 0 3px var(--glow);
+}
+
+/* Search in the Files panel */
+.files-find {
+  display: grid;
+  gap: 4px;
+  padding: 4px 6px;
+  border-bottom: 1px solid var(--line);
+  background: var(--cmd);
+}
+.files-find-bar {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  gap: 4px;
+}
+.files-find input,
+.files-find select {
+  box-sizing: border-box;
+  min-width: 0;
+  padding: 2px 6px;
+  border: 1px solid var(--input-line);
+  background: var(--pane);
+  color: var(--ink);
+  font: inherit;
+}
+.files-find p {
+  margin: 0;
+}
+.files-hits {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 180px;
+  overflow: auto;
+  border: 1px solid var(--pane-line);
+  background: var(--pane);
+}
+.files-hits button {
+  display: grid;
+  width: 100%;
+  text-align: left;
+  padding: 2px 6px;
+  background: none;
+  border: 0;
+  color: var(--ink);
+  font: inherit;
+  cursor: pointer;
+}
+.files-hits button:hover,
+.files-hits button:focus-visible {
+  background: var(--sel);
+  outline: none;
+}
+.hit-path {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.hit-text {
+  color: var(--dim);
+  font-size: var(--t-sm);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Log view */
+.logview {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  grid-template-rows: auto 1fr;
+  background: var(--pane);
+  min-height: 0;
+}
+.logview[hidden] {
+  display: none;
+}
+.log-bar {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  padding: 4px 6px;
+  background: var(--cmd);
+  border-bottom: 1px solid var(--cmd-line);
+  flex-wrap: wrap;
+}
+.log-bar input {
+  box-sizing: border-box;
+  min-width: 160px;
+  flex: 1 1 200px;
+  padding: 2px 6px;
+  border: 1px solid var(--input-line);
+  background: var(--pane);
+  color: var(--ink);
+  font: inherit;
+}
+.log-state {
+  margin-left: auto;
+}
+.log-lines {
+  overflow: auto;
+  min-height: 0;
+  padding: 4px 8px;
+  font-family: ui-monospace, 'Cascadia Mono', Consolas, monospace;
+  font-size: var(--t-sm);
+  line-height: 1.45;
+  white-space: pre;
+}
+.log-lines.wrap {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.log-line.error {
+  color: #b3261e;
+}
+.log-line.warn {
+  color: #8a5a00;
 }

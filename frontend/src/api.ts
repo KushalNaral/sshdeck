@@ -1,4 +1,4 @@
-import type { Analysis, Dep, Link, HistorySettings, Listing, Policy, Server, StartResult, Step, TextFile, Transfer, TunnelState, Version, Vpn } from './types'
+import type { Analysis, Dep, Link, HistorySettings, Listing, Policy, Server, StartResult, Step, TextFile, RunResult, SearchHit, Transfer, TunnelState, Version, Vpn } from './types'
 import { mockFiles, mockHistory } from './mockFiles'
 
 /** Everything the UI needs from the Go side. The Wails bindings will implement this same shape. */
@@ -8,6 +8,8 @@ export interface FilesApi {
   containers(serverId: string): Promise<string[]>
   // In every call below, serverId may be "server@container" to work inside that container.
   list(serverId: string, dir: string): Promise<Listing>
+  /** Files under dir whose name matches, or that contain the text. At most 500. */
+  search(serverId: string, dir: string, query: string, byContent: boolean): Promise<SearchHit[]>
   read(serverId: string, path: string): Promise<TextFile>
   /** Returns the new version. Rejects with a message containing "changed on the server" when someone else saved first. */
   write(serverId: string, path: string, content: string, version: string): Promise<string>
@@ -54,9 +56,31 @@ export interface TunnelsApi {
   onChange(serverId: string, cb: (t: TunnelState[]) => void): () => void
 }
 
+export interface RunApi {
+  /** Runs on the servers that are connected; the others come back as skipped. Resolves with the run id. */
+  start(serverIds: string[], command: string): Promise<string>
+  cancel(runId: string): void
+  /** Current results, for catching up after the first events. */
+  results(runId: string): Promise<RunResult[]>
+  onResult(runId: string, cb: (r: RunResult) => void): () => void
+}
+
+export type LogKind = 'journal' | 'file' | 'container'
+
+export interface LogsApi {
+  /** Follows a log. target is the server id, or "serverId@container" for a file inside a container. Resolves with the log's id. */
+  start(target: string, kind: LogKind, arg: string): Promise<string>
+  stop(id: string): void
+  onLines(id: string, cb: (lines: string[]) => void): () => void
+  /** Called once when the log stops. why is empty after a normal stop. */
+  onEnd(id: string, cb: (why: string) => void): () => void
+}
+
 export interface Backend {
   files: FilesApi
+  logs: LogsApi
   tunnels: TunnelsApi
+  run: RunApi
   history: HistoryApi
   connect(server: Server, vpn: Vpn | undefined, onSteps: (steps: Step[]) => void): Promise<void>
   confirmManualVpn(serverId: string): void
@@ -146,9 +170,72 @@ const mockTunnels: TunnelsApi = (() => {
   }
 })()
 
+const mockRun: RunApi = (() => {
+  const subs = new Map<string, Set<(r: RunResult) => void>>()
+  const last = new Map<string, Map<string, RunResult>>()
+  const push = (id: string, r: RunResult) => {
+    last.get(id)?.set(r.server, r)
+    subs.get(id)?.forEach((cb) => cb(r))
+  }
+  let n = 0
+  return {
+    async start(ids, command) {
+      const id = `run${++n}`
+      last.set(id, new Map())
+      ids.forEach((sid, i) => {
+        const name = demoServers.get(sid)?.name ?? sid
+        const base: RunResult = { server: sid, name, state: 'running', exit: 0, output: '', ms: 0 }
+        if (!demoServers.has(sid)) return setTimeout(() => push(id, { ...base, state: 'skipped', error: 'Not connected. Connect to this server first.' }), 50)
+        setTimeout(() => push(id, base), 50 * i)
+        setTimeout(() => {
+          const bad = i % 3 === 2
+          push(id, { ...base, state: bad ? 'failed' : 'done', exit: bad ? 1 : 0, ms: 300 + i * 120, output: bad ? `${command}: command failed on ${name}\n` : `$ ${command}\nFilesystem      Size  Used Avail Use% Mounted on\n/dev/sda1        40G   19G   19G  50% /\n` })
+        }, 600 + i * 250)
+      })
+      return id
+    },
+    cancel: () => {},
+    results: async (id) => [...(last.get(id)?.values() ?? [])],
+    onResult(id, cb) {
+      subs.set(id, (subs.get(id) ?? new Set()).add(cb))
+      return () => void subs.get(id)?.delete(cb)
+    },
+  }
+})()
+
+const mockLogs: LogsApi = (() => {
+  const timers = new Map<string, ReturnType<typeof setInterval>>()
+  const lines = new Map<string, Set<(l: string[]) => void>>()
+  const ends = new Map<string, Set<(w: string) => void>>()
+  let n = 0
+  const sample = ['GET /index.php 200 1.2ms', 'GET /health 200 0.3ms', 'level=warning msg="slow query" ms=1840', 'sshd[812]: Accepted password for deploy', 'php-fpm: error: child 331 exited on signal 11', 'POST /login 302 24ms']
+  return {
+    async start(_t, _k, arg) {
+      const id = `log${++n}`
+      let i = 0
+      timers.set(id, setInterval(() => lines.get(id)?.forEach((cb) => cb([`${new Date().toISOString().slice(11, 19)} ${arg || 'journal'}: ${sample[i++ % sample.length]}`])), 400))
+      return id
+    },
+    stop(id) {
+      clearInterval(timers.get(id))
+      ends.get(id)?.forEach((cb) => cb(''))
+    },
+    onLines(id, cb) {
+      lines.set(id, (lines.get(id) ?? new Set()).add(cb))
+      return () => void lines.get(id)?.delete(cb)
+    },
+    onEnd(id, cb) {
+      ends.set(id, (ends.get(id) ?? new Set()).add(cb))
+      return () => void ends.get(id)?.delete(cb)
+    },
+  }
+})()
+
 export const mockBackend: Backend = {
   files: mockFiles,
+  logs: mockLogs,
   tunnels: mockTunnels,
+  run: mockRun,
   history: mockHistory,
   async connect(server, vpn, onSteps) {
     demoServers.set(server.id, server)

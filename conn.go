@@ -402,6 +402,7 @@ func (a *App) Disconnect(serverID string) {
 		return
 	}
 	a.stopTunnels(serverID)
+	a.stopLogs(serverID)
 	if c.stop != nil {
 		c.stop()
 	}

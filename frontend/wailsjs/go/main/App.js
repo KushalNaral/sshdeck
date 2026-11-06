@@ -14,6 +14,10 @@ export function AttachShell(arg1, arg2, arg3, arg4) {
   return window['go']['main']['App']['AttachShell'](arg1, arg2, arg3, arg4);
 }
 
+export function CancelRun(arg1) {
+  return window['go']['main']['App']['CancelRun'](arg1);
+}
+
 export function CancelTransfer(arg1) {
   return window['go']['main']['App']['CancelTransfer'](arg1);
 }
@@ -72,6 +76,10 @@ export function DeleteLogin(arg1, arg2) {
 
 export function DeleteServer(arg1) {
   return window['go']['main']['App']['DeleteServer'](arg1);
+}
+
+export function DeleteSnippet(arg1) {
+  return window['go']['main']['App']['DeleteSnippet'](arg1);
 }
 
 export function DeleteTask(arg1) {
@@ -136,6 +144,10 @@ export function ListDir(arg1, arg2) {
 
 export function ListServers() {
   return window['go']['main']['App']['ListServers']();
+}
+
+export function ListSnippets() {
+  return window['go']['main']['App']['ListSnippets']();
 }
 
 export function ListTasks() {
@@ -210,12 +222,24 @@ export function RetryTransfer(arg1) {
   return window['go']['main']['App']['RetryTransfer'](arg1);
 }
 
+export function RunOn(arg1, arg2) {
+  return window['go']['main']['App']['RunOn'](arg1, arg2);
+}
+
+export function RunResults(arg1) {
+  return window['go']['main']['App']['RunResults'](arg1);
+}
+
 export function SaveLogin(arg1, arg2, arg3) {
   return window['go']['main']['App']['SaveLogin'](arg1, arg2, arg3);
 }
 
 export function SaveServer(arg1, arg2) {
   return window['go']['main']['App']['SaveServer'](arg1, arg2);
+}
+
+export function SaveSnippet(arg1) {
+  return window['go']['main']['App']['SaveSnippet'](arg1);
 }
 
 export function SaveTask(arg1) {
@@ -228,6 +252,10 @@ export function SaveTemplate() {
 
 export function SaveVPN(arg1, arg2) {
   return window['go']['main']['App']['SaveVPN'](arg1, arg2);
+}
+
+export function SearchFiles(arg1, arg2, arg3, arg4) {
+  return window['go']['main']['App']['SearchFiles'](arg1, arg2, arg3, arg4);
 }
 
 export function ServerHistory(arg1, arg2) {
@@ -254,8 +282,16 @@ export function SetLockSettings(arg1, arg2) {
   return window['go']['main']['App']['SetLockSettings'](arg1, arg2);
 }
 
+export function StartLog(arg1, arg2, arg3) {
+  return window['go']['main']['App']['StartLog'](arg1, arg2, arg3);
+}
+
 export function StartTunnel(arg1, arg2) {
   return window['go']['main']['App']['StartTunnel'](arg1, arg2);
+}
+
+export function StopLog(arg1) {
+  return window['go']['main']['App']['StopLog'](arg1);
 }
 
 export function StopTunnel(arg1, arg2) {

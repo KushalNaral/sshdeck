@@ -4,6 +4,7 @@ import type { Login, Server, Tunnel, Vpn, VpnKind } from '../types'
 import { VPN_LABEL } from '../types'
 import { AuditPanel } from './AuditPanel'
 import { HistorySettingsPanel } from './HistorySettingsPanel'
+import { SnippetsPanel } from './SnippetsPanel'
 import { GatewayCert } from './GatewayCert'
 import { ImportPanel } from './ImportPanel'
 import { LoginsEditor } from './LoginsEditor'
@@ -13,7 +14,7 @@ import { UpdatePanel } from './UpdatePanel'
 import type { LockState } from '../lib/lock'
 import { Mark } from './Mark'
 
-type Tab = 'servers' | 'vpns' | 'import' | 'system' | 'security' | 'history' | 'audit'
+type Tab = 'servers' | 'vpns' | 'snippets' | 'import' | 'system' | 'security' | 'history' | 'audit'
 
 interface Props {
   servers: Server[]
@@ -298,6 +299,7 @@ export function Admin({ servers, vpns, lock, onLockChange, onSaveServer, onDelet
         <strong>Setup</strong>
         <button className="btn" aria-pressed={tab === 'servers'} onClick={() => switchTab('servers')}>Servers · {servers.length}</button>
         <button className="btn" aria-pressed={tab === 'vpns'} onClick={() => switchTab('vpns')}>VPN profiles · {vpns.length}</button>
+        <button className="btn" aria-pressed={tab === 'snippets'} onClick={() => switchTab('snippets')}>Snippets</button>
         <button className="btn" aria-pressed={tab === 'import'} onClick={() => switchTab('import')}>Import</button>
         <button className="btn" aria-pressed={tab === 'system'} onClick={() => switchTab('system')}>System</button>
         <button className="btn" aria-pressed={tab === 'security'} onClick={() => switchTab('security')}>Security</button>
@@ -306,6 +308,7 @@ export function Admin({ servers, vpns, lock, onLockChange, onSaveServer, onDelet
         {(tab === 'servers' || tab === 'vpns') && <button className="btn" style={{ marginLeft: 'auto' }} onClick={() => (setCopyOf(null), setEditing('new'))}>Add {tab === 'servers' ? 'server' : 'VPN profile'}</button>}
       </div>
 
+      {tab === 'snippets' && <SnippetsPanel />}
       {tab === 'import' && <ImportPanel onImported={onImported} />}
       {tab === 'system' && (
         <>

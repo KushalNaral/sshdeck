@@ -15,6 +15,8 @@ one is needed, logs in over SSH and opens a terminal. It also reads each server 
 - Files and the editor work inside running Docker containers too
 - File history: every save keeps the old text, with who changed it and when, so you can compare and restore
 - Saved SSH tunnels (port forwards) and jump hosts (`ssh -J`), and a warning before a second VPN is connected
+- Run a command on several servers at once, with saved snippets
+- Search under a folder, open a shell in it, and follow logs (journal, container, file)
 - Panels you can resize, hide and dock
 - Read-only scan of each server: OS, memory, disks, failed services, containers and software versions
 - Servers ranked 1 to 5 by failed services, full disks, outdated software and overdue tasks, with the reasons shown
@@ -54,7 +56,7 @@ sshdeck checks GitHub for a newer release when it starts and shows an Update but
 2. Admin, Servers: add a server with its host, user and password or key, and pick its VPN.
 3. Firefight: select the server and press Connect.
 
-Ctrl+K finds a server, Ctrl+T opens a shell tab, Ctrl+1/2/3 switch between Firefight, Tasks and Admin, and
+Ctrl+K finds a server, Ctrl+T opens a shell tab, Ctrl+1/2/3/4 switch between Firefight, Tasks, Admin and Run, and
 Ctrl+Shift+F searches the terminal.
 
 To bring in many servers at once, use Admin, Import. "Save a blank template" gives you the CSV columns; each row is
@@ -83,6 +85,14 @@ Drag the borders between panels to resize them, Ctrl+B hides the server list, Ct
 When the server runs containers, the Files tab gets a picker at the top: choose a container and the same browser,
 uploads and editor work on its files. As root it goes through the host's `/proc`; otherwise it uses `docker exec`.
 Saved files keep their owner and permissions.
+
+The Run view (Ctrl+4) runs one command on the servers you pick and shows each answer in its own card. It only uses
+servers that are already connected; "Connect" there uses the normal flow. Save commands you use often as snippets
+(Admin, Snippets); each terminal also has a Snippets menu that types one without running it.
+
+In the Files tab, the magnifier searches under the current folder by name or by text, and the terminal button opens a
+shell there. The scroll button follows the selected file like `tail -f`; the same button in the terminal bar follows the
+system journal, and Analysis has a Log button for each failed service and container.
 
 The passphrase lock is in Admin, Security. There is no recovery if the passphrase is lost.
 

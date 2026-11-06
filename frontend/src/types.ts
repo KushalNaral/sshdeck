@@ -125,6 +125,8 @@ export type SessionState = 'connecting' | 'live' | 'failed'
 
 /** A tab that runs inside a container instead of the server's own shell. */
 export interface ContainerTab {
+  /** Start the shell in this folder. */
+  cwd?: string
   container: string
   /** '' is the container's default user; 'root' is the admin user. */
   user: string
@@ -155,12 +157,14 @@ export interface Session {
   activeTab: number
   nextTab: number
   tabInfo?: Record<number, ContainerTab>
+  /** Shells opened with "Terminal here": the folder each starts in. */
+  tabCwd?: Record<number, string>
   since?: number
   error?: { problem: string; recovery: string; details?: string }
   link?: Link
 }
 
-export type Mode = 'firefight' | 'tasks' | 'admin'
+export type Mode = 'firefight' | 'tasks' | 'run' | 'admin'
 
 export type TaskStatus = 'todo' | 'doing' | 'done'
 
@@ -245,4 +249,31 @@ export interface HistorySettings {
   keep: number
   days: number
   deny: string[]
+}
+
+/** A saved shell command. */
+export interface Snippet {
+  id: string
+  name: string
+  command: string
+  note?: string
+}
+
+/** One server's part of a multi-server run. */
+export interface RunResult {
+  server: string
+  name: string
+  state: 'waiting' | 'running' | 'done' | 'failed' | 'cancelled' | 'skipped'
+  exit: number
+  output: string
+  truncated?: boolean
+  ms: number
+  error?: string
+}
+
+export interface SearchHit {
+  path: string
+  /** Content search only: the matching line. */
+  line?: number
+  text?: string
 }

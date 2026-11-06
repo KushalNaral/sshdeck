@@ -1,8 +1,9 @@
-import { ArrowDown, ArrowUp, History, Download, File as FileIcon, FilePlus, FileText, Folder, FolderPlus, FolderUp, Home, Link2, Pencil, RefreshCw, Trash2, Upload, X } from 'lucide-react'
+import { ArrowDown, ArrowUp, History, ScrollText, Search, SquareTerminal, Download, File as FileIcon, FilePlus, FileText, Folder, FolderPlus, FolderUp, Home, Link2, Pencil, RefreshCw, Trash2, Upload, X } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { Backend } from '../api'
 import { basename, crumbs, dirname, humanSize, join, shortDate, targetOf, validName } from '../lib/files'
-import type { FileEntry, Listing, Policy, StartResult, Transfer } from '../types'
+import { messageOf } from '../lib/config'
+import type { FileEntry, Listing, Policy, SearchHit, StartResult, Transfer } from '../types'
 import { clamp, LIMITS, DEFAULT, type Layout } from '../lib/layout'
 import { Confirm } from './Confirm'
 import { Splitter } from './Splitter'
@@ -13,7 +14,11 @@ interface Props {
   live: boolean
   backend: Backend
   /** Opens a file in the editor. target is the server id, or "serverId@container". */
-  onEdit: (target: string, path: string) => void
+  onEdit: (target: string, path: string, line?: number) => void
+  /** Follows a file as it grows. target is as for onEdit. */
+  onTail: (target: string, path: string) => void
+  /** Opens a shell in this folder. ctr is the container being browsed, or empty for the server. */
+  onTerminal: (ctr: string, dir: string) => void
   /** Opens the file in the editor with its history showing. */
   onHistory: (target: string, path: string) => void
   layout: Layout
@@ -31,7 +36,7 @@ type SortKey = 'name' | 'size' | 'mtime'
 // The container each server's panel was showing (empty: the server itself).
 const lastCtr = new Map<string, string>()
 
-export function FilesPanel({ serverId: baseId, serverName, live, backend, onEdit, onHistory, layout, onLayout }: Props) {
+export function FilesPanel({ serverId: baseId, serverName, live, backend, onEdit, onTail, onTerminal, onHistory, layout, onLayout }: Props) {
   const [ctr, setCtrState] = useState(lastCtr.get(baseId) ?? '')
   const [ctrs, setCtrs] = useState<string[]>([])
   useEffect(() => setCtrState(lastCtr.get(baseId) ?? ''), [baseId])
@@ -166,6 +171,19 @@ export function FilesPanel({ serverId: baseId, serverName, live, backend, onEdit
   }, [live])
 
   // ---- actions ----
+  const [find, setFind] = useState<{ q: string; content: boolean; hits: SearchHit[] | null; busy: boolean; err: string } | null>(null)
+  const toggleFind = () => setFind((f) => (f ? null : { q: '', content: false, hits: null, busy: false, err: '' }))
+  const runFind = async () => {
+    if (!find?.q.trim()) return
+    setFind((f) => f && { ...f, busy: true, err: '', hits: null })
+    try {
+      const hits = await backend.files.search(serverId, cwd, find.q, find.content)
+      setFind((f) => f && { ...f, busy: false, hits })
+    } catch (e) {
+      setFind((f) => f && { ...f, busy: false, err: messageOf(e) })
+    }
+  }
+  const openHit = (h: SearchHit) => (h.line || TEXTY.test(basename(h.path)) ? onEdit(serverId, h.path, h.line) : void go(dirname(h.path)))
   const open = (e: FileEntry) => (e.dir ? void go(e.path) : onEdit(serverId, e.path))
   const startNew = (isNew: 'dir' | 'file') => setEditing({ path: join(cwd, ''), isNew })
   const commitEdit = async (name: string) => {
@@ -242,7 +260,7 @@ export function FilesPanel({ serverId: baseId, serverName, live, backend, onEdit
   const arrow = (key: SortKey) => (sort.key === key ? sort.asc ? <ArrowUp size={11} strokeWidth={2.5} /> : <ArrowDown size={11} strokeWidth={2.5} /> : null)
   const active = transfers.filter((t) => t.state === 'queued' || t.state === 'running')
   return (
-    <div className={`files${over ? ' dropping' : ''}`} ref={box} style={{ '--wails-drop-target': 'drop', '--c-size': `${layout.cols.size}px`, '--c-mod': `${layout.cols.modified}px` } as React.CSSProperties} onKeyDown={onKey}>
+    <div className={`files${over ? ' dropping' : ''}`} ref={box} style={{ '--wails-drop-target': 'drop', '--c-size': `${layout.cols.size}px`, '--c-mod': `${layout.cols.modified}px` } as React.CSSProperties} onKeyDown={(e) => (e.ctrlKey && e.shiftKey && e.key.toLowerCase() === 's' ? (e.preventDefault(), toggleFind()) : onKey(e))}>
       {(ctrs.length > 0 || ctr) && (
         <label className="files-loc">
           <span>Files in</span>
@@ -316,7 +334,55 @@ export function FilesPanel({ serverId: baseId, serverName, live, backend, onEdit
         <button className="btn icon" onClick={() => setDel(chosen.map((c) => c.path))} disabled={noPick} title="Delete (Del)" aria-label="Delete">
           <Trash2 size={14} strokeWidth={2} />
         </button>
+        <span className="sep" />
+        <button className="btn icon" onClick={toggleFind} aria-pressed={!!find} title="Search this folder (Ctrl+Shift+S)" aria-label="Search">
+          <Search size={14} strokeWidth={2} />
+        </button>
+        <button className="btn icon" onClick={() => onTail(serverId, chosen[0].path)} disabled={chosen.length !== 1 || chosen[0].dir} title="Follow the selected file, like tail -f" aria-label="Follow file">
+          <ScrollText size={14} strokeWidth={2} />
+        </button>
+        <button className="btn icon" onClick={() => onTerminal(ctr, cwd)} disabled={!cwd} title="Open a shell in this folder" aria-label="Terminal here">
+          <SquareTerminal size={14} strokeWidth={2} />
+        </button>
       </div>
+      {find && (
+        <div className="files-find" role="search" aria-label={`Search under ${cwd}`}>
+          <div className="files-find-bar">
+            <input
+              autoFocus
+              aria-label="Search for"
+              placeholder={find.content ? 'Text inside files' : 'File name (* works)'}
+              value={find.q}
+              onChange={(e) => setFind({ ...find, q: e.target.value })}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') void runFind()
+                if (e.key === 'Escape') setFind(null)
+              }}
+            />
+            <select aria-label="Search by" value={find.content ? 'content' : 'name'} onChange={(e) => setFind({ ...find, content: e.target.value === 'content', hits: null })}>
+              <option value="name">By name</option>
+              <option value="content">By content</option>
+            </select>
+            <button className="btn" onClick={() => void runFind()} disabled={find.busy || !find.q.trim()}>{find.busy ? 'Searching…' : 'Search'}</button>
+          </div>
+          {find.err && <p className="bad" role="alert">{find.err}</p>}
+          {find.hits && (
+            <>
+              <p className="dim">{find.hits.length === 0 ? 'Nothing found under this folder.' : `${find.hits.length}${find.hits.length >= 500 ? '+' : ''} found under ${cwd}`}</p>
+              <ul className="files-hits">
+                {find.hits.map((h, i) => (
+                  <li key={`${h.path}:${h.line ?? 0}:${i}`}>
+                    <button onClick={() => openHit(h)} title={h.path}>
+                      <span className="hit-path">{h.path.startsWith(cwd) ? h.path.slice(cwd.length).replace(/^\//, '') : h.path}{h.line ? `:${h.line}` : ''}</span>
+                      {h.text && <span className="hit-text">{h.text}</span>}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </>
+          )}
+        </div>
+      )}
 
       <div className="files-list" role="listbox" aria-multiselectable="true" aria-label={`Files in ${cwd}`} tabIndex={0}>
         <div className="files-head" role="row">

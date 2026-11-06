@@ -6,6 +6,7 @@ import { LockScreen } from './components/LockScreen'
 import { Confirm } from './components/Confirm'
 import { Connection } from './components/Connection'
 import { Tunnels } from './components/Tunnels'
+import { RunView } from './components/RunView'
 import { Mark } from './components/Mark'
 import { Analysis } from './components/Analysis'
 import { Logins } from './components/Logins'
@@ -26,6 +27,7 @@ import { lockApi, type LockState } from './lib/lock'
 import { applyTheme, loadTheme, THEMES } from './lib/theme'
 import { DEFAULT as DEFAULT_LAYOUT, LIMITS, clamp, loadLayout, sanitize, saveLayout, type Layout } from './lib/layout'
 import { Splitter } from './components/Splitter'
+import type { LogKind } from './api'
 import type { Analysis as AnalysisData, ContainerTab, Login, Mode, Server, Session, Task, Vpn } from './types'
 
 /** Grid tracks for the Firefight stage. A closed panel and its splitter take no room. */
@@ -168,8 +170,8 @@ export default function App() {
   }
 
   const addTab = useCallback(
-    (id: string, info?: ContainerTab) =>
-      patch(id, (s) => ({ ...s, tabs: [...s.tabs, s.nextTab], activeTab: s.nextTab, nextTab: s.nextTab + 1, tabInfo: info ? { ...s.tabInfo, [s.nextTab]: info } : s.tabInfo })),
+    (id: string, info?: ContainerTab, cwd?: string) =>
+      patch(id, (s) => ({ ...s, tabs: [...s.tabs, s.nextTab], activeTab: s.nextTab, nextTab: s.nextTab + 1, tabInfo: info ? { ...s.tabInfo, [s.nextTab]: info } : s.tabInfo, tabCwd: cwd ? { ...s.tabCwd, [s.nextTab]: cwd } : s.tabCwd })),
     [patch],
   )
   // Production servers ask first. The confirmation is written to the audit trail, then the action runs.
@@ -240,13 +242,22 @@ export default function App() {
   const [docs, setDocs] = useState<Record<string, Doc[]>>({})
   const [activeDoc, setActiveDoc] = useState<Record<string, string | null>>({})
   const [side, setSide] = useState<'analysis' | 'files' | 'history'>('analysis')
-  const openDoc = (id: string, path: string, history = false, target = id) => {
+  const openDoc = (id: string, path: string, history = false, target = id, line = 0) => {
     const key = docKey(id, { path, target, dirty: false })
     setDocs((d) => {
       const list = d[id] ?? []
-      if (!list.some((x) => docKey(id, x) === key)) return { ...d, [id]: [...list, { path, target, dirty: false, history: history ? 1 : 0 }] }
-      return history ? { ...d, [id]: list.map((x) => (docKey(id, x) === key ? { ...x, history: (x.history ?? 0) + 1 } : x)) } : d
+      const at = line ? { line, n: Date.now() } : undefined
+      if (!list.some((x) => docKey(id, x) === key)) return { ...d, [id]: [...list, { path, target, dirty: false, history: history ? 1 : 0, line: at }] }
+      return history || at ? { ...d, [id]: list.map((x) => (docKey(id, x) === key ? { ...x, history: (x.history ?? 0) + (history ? 1 : 0), line: at ?? x.line } : x)) } : d
     })
+    setActiveDoc((a) => ({ ...a, [id]: key }))
+  }
+  // A followed log opens as a tab next to the open files.
+  const openLog = (id: string, kind: LogKind, arg: string, target = id) => {
+    const path = `log:${kind}:${arg}`
+    const doc: Doc = { path, target, dirty: false, log: { kind, arg } }
+    const key = docKey(id, doc)
+    setDocs((d) => ((d[id] ?? []).some((x) => docKey(id, x) === key) ? d : { ...d, [id]: [...(d[id] ?? []), doc] }))
     setActiveDoc((a) => ({ ...a, [id]: key }))
   }
   const docsRef = useRef(docs)
@@ -372,6 +383,7 @@ export default function App() {
       else if (e.key === '1') act(() => setMode('firefight'))
       else if (e.key === '2') act(() => setMode('tasks'))
       else if (e.key === '3') act(() => setMode('admin'))
+      else if (e.key === '4') act(() => setMode('run'))
     }
     // Capture phase: xterm stops key events before they bubble, so shortcuts must be caught first.
     window.addEventListener('keydown', onKey, true)
@@ -408,6 +420,10 @@ export default function App() {
             <Mark kind={mode === 'admin' ? 'filled' : 'hollow'} />
             <span>C · Admin</span>
           </button>
+          <button aria-pressed={mode === 'run'} onClick={() => setMode('run')}>
+            <Mark kind={mode === 'run' ? 'filled' : 'hollow'} />
+            <span>D · Run</span>
+          </button>
         </div>
         <div className="hints">
           <span>
@@ -417,7 +433,7 @@ export default function App() {
             <kbd>Ctrl T</kbd> New shell
           </span>
           <span>
-            <kbd>Ctrl 1</kbd> <kbd>2</kbd> <kbd>3</kbd> Job
+            <kbd>Ctrl 1</kbd> <kbd>2</kbd> <kbd>3</kbd> <kbd>4</kbd> Job
           </span>
         </div>
         <div className="viewbtns" role="group" aria-label="Layout">
@@ -486,7 +502,7 @@ export default function App() {
             onCloseDoc={closeDoc}
             onHistoryCopy={(id, mode) => void attempt(async () => { await backend.history.setCopy(id, mode); setConfig((c) => ({ ...c, servers: c.servers.map((x) => (x.id === id ? { ...x, historyCopy: mode } : x)) })) })}
             onDirty={(id, key, dirty) => setDocs((d) => ({ ...d, [id]: (d[id] ?? []).map((x) => (docKey(id, x) === key && x.dirty !== dirty ? { ...x, dirty } : x)) }))}
-            onAddTab={addTab}
+            onAddTab={addTab} onLog={openLog}
             onCloseTab={closeTab}
           />
         </div>
@@ -507,9 +523,9 @@ export default function App() {
           {side === 'history' ? (
             <HistoryPanel serverId={selected} serverName={server.name} backend={backend} live={live} onOpen={(t, p) => openDoc(selected, p, true, t)} />
           ) : side === 'files' ? (
-            <FilesPanel serverId={selected} serverName={server.name} live={live} backend={backend} onEdit={(t, p) => openDoc(selected, p, false, t)} onHistory={(t, p) => openDoc(selected, p, true, t)} layout={layout} onLayout={setLayout} />
+            <FilesPanel serverId={selected} serverName={server.name} live={live} backend={backend} onEdit={(t, p, line) => openDoc(selected, p, false, t, line)} onTail={(t, p) => openLog(selected, 'file', p, t)} onTerminal={(ctr, dir) => (ctr ? requestExec(selected, { container: ctr, user: '', sudo: false, cwd: dir }) : addTab(selected, undefined, dir))} onHistory={(t, p) => openDoc(selected, p, true, t)} layout={layout} onLayout={setLayout} />
           ) : (
-            <Analysis server={server} triage={levels[server.id]} data={analysis[selected]} scanning={scanning === selected} error={scanErrors[selected]} connected={live} onExec={(c) => requestExec(selected, c)} onRescan={() => void scan(selected)} onTrack={(n, v) => trackSoftware(selected, n, v)} onCopySsh={() => attempt(() => configStore.copySSH(selected))} connection={<><Connection server={server} vpns={vpns} session={sess} /><Tunnels server={server} live={live} backend={backend} /></>} logins={<Logins server={server} onCopy={(l, f) => attempt(() => configStore.copyLogin(selected, l.id, f))} />} />
+            <Analysis server={server} triage={levels[server.id]} data={analysis[selected]} scanning={scanning === selected} error={scanErrors[selected]} connected={live} onExec={(c) => requestExec(selected, c)} onLog={(kind, arg) => openLog(selected, kind, arg)} onRescan={() => void scan(selected)} onTrack={(n, v) => trackSoftware(selected, n, v)} onCopySsh={() => attempt(() => configStore.copySSH(selected))} connection={<><Connection server={server} vpns={vpns} session={sess} /><Tunnels server={server} live={live} backend={backend} /></>} logins={<Logins server={server} onCopy={(l, f) => attempt(() => configStore.copyLogin(selected, l.id, f))} />} />
           )}
         </div>
         )}
@@ -528,6 +544,12 @@ export default function App() {
               setMode('firefight')
             }}
           />
+        </main>
+      )}
+
+      {mode === 'run' && (
+        <main className="stage">
+          <RunView servers={servers} vpns={vpns} sessions={sessions} backend={backend} onConnect={(id) => (sessionsRef.current[id] ? Promise.resolve() : requestConnect(id))} ask={(a) => setAsk(a)} />
         </main>
       )}
 

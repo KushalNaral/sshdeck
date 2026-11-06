@@ -28,6 +28,8 @@ interface Props {
   onRescan: () => void
   /** Open a shell inside a running container. */
   onExec: (c: ContainerTab) => void
+  /** Follow a log: a failed service's journal or a container's output. */
+  onLog: (kind: 'journal' | 'container', arg: string) => void
   /** Start tracking a found piece of software, or update the version already tracked. */
   onTrack: (name: string, version: string) => void
   /** Copies the ssh command for this server; resolves with an error message or null. */
@@ -37,7 +39,7 @@ interface Props {
 }
 
 /** Read-only picture of the box, laid out like departure columns. */
-export function Analysis({ server, triage, data, scanning, error, connected, onRescan, onExec, onTrack, onCopySsh, connection, logins }: Props) {
+export function Analysis({ server, triage, data, scanning, error, connected, onRescan, onExec, onLog, onTrack, onCopySsh, connection, logins }: Props) {
   const [runAs, setRunAs] = useState<'default' | 'root' | 'other'>('root')
   const [other, setOther] = useState('')
   const [sudo, setSudo] = useState(false)
@@ -170,6 +172,7 @@ export function Analysis({ server, triage, data, scanning, error, connected, onR
               data.failedUnits.map((u) => (
                 <div key={u} className="bad" style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
                   <Mark kind="struck" /> {u}
+                  <button className="btn" disabled={!connected} onClick={() => onLog('journal', u)} title={connected ? `Follow the log of ${u}` : 'Connect to the server first'}>Log</button>
                 </div>
               ))
             )}
@@ -225,6 +228,9 @@ export function Analysis({ server, triage, data, scanning, error, connected, onR
                           onClick={() => onExec({ container: c.name, user, sudo })}
                         >
                           Shell
+                        </button>{' '}
+                        <button className="btn" disabled={!connected} onClick={() => onLog('container', c.name)} title={connected ? `Follow the output of ${c.name}` : 'Connect to the server first'}>
+                          Log
                         </button>
                       </td>
                     </tr>

@@ -1,7 +1,7 @@
 import * as App from '../wailsjs/go/main/App'
 import { EventsOn } from '../wailsjs/runtime/runtime'
-import { ConnectError, type Backend, type FilesApi, type HistoryApi, type TunnelsApi } from './api'
-import type { Analysis, HistorySettings, Link, Listing, Step, Transfer, TunnelState, Version } from './types'
+import { ConnectError, type Backend, type FilesApi, type HistoryApi, type LogsApi, type RunApi, type TunnelsApi } from './api'
+import type { Analysis, HistorySettings, Link, Listing, RunResult, SearchHit, Step, Transfer, TunnelState, Version } from './types'
 
 const fromBase64 = (b64: string) => Uint8Array.from(atob(b64), (c) => c.charCodeAt(0))
 
@@ -19,6 +19,7 @@ const go = async <T>(p: Promise<T>): Promise<T> => {
 const files: FilesApi = {
   containers: async (s) => ((await go(App.Containers(s))) ?? []) as string[],
   list: (s, d) => go(App.ListDir(s, d)) as Promise<Listing>,
+  search: async (s, d, q, c) => ((await go(App.SearchFiles(s, d, q, c))) ?? []) as SearchHit[],
   read: (s, p) => go(App.ReadText(s, p)),
   write: (s, p, c, v) => go(App.WriteText(s, p, c, v)),
   mkdir: (s, p) => go(App.Mkdir(s, p)),
@@ -46,6 +47,20 @@ const tunnels: TunnelsApi = {
   onChange: (s, cb) => EventsOn('tunnels:' + s, (t: TunnelState[]) => cb(t ?? [])),
 }
 
+const logs: LogsApi = {
+  start: (t, k, a) => go(App.StartLog(t, k, a)),
+  stop: (id) => void App.StopLog(id),
+  onLines: (id, cb) => EventsOn('log:' + id, (l: string[]) => cb(l ?? [])),
+  onEnd: (id, cb) => EventsOn('log:' + id + ':end', (w: string) => cb(w ?? '')),
+}
+
+const run: RunApi = {
+  start: (ids, cmd) => go(App.RunOn(ids, cmd)),
+  cancel: (id) => void App.CancelRun(id),
+  results: async (id) => ((await App.RunResults(id)) ?? []) as RunResult[],
+  onResult: (id, cb) => EventsOn('run:' + id, cb),
+}
+
 const history: HistoryApi = {
   file: async (s, p) => ((await go(App.FileHistory(s, p))) ?? []) as Version[],
   server: async (s, n) => ((await go(App.ServerHistory(s, n))) ?? []) as Version[],
@@ -63,7 +78,9 @@ const history: HistoryApi = {
 
 export const wailsBackend: Backend = {
   files,
+  logs,
   tunnels,
+  run,
   history,
   async connect(server, _vpn, onSteps) {
     const off = EventsOn(`connect:${server.id}`, (steps: Step[]) => onSteps(steps))

@@ -207,9 +207,10 @@ func (e VPNInUseError) Error() string {
 }
 
 type fileData struct {
-	Servers []Server `json:"servers"`
-	VPNs    []VPN    `json:"vpns"`
-	Tasks   []Task   `json:"tasks,omitempty"`
+	Servers  []Server  `json:"servers"`
+	VPNs     []VPN     `json:"vpns"`
+	Tasks    []Task    `json:"tasks,omitempty"`
+	Snippets []Snippet `json:"snippets,omitempty"`
 	// Secrets holds passwords when the vault is enabled (see vault.go); otherwise they live in the OS keyring.
 	Secrets map[string]string `json:"secrets,omitempty"`
 }

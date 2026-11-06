@@ -289,6 +289,48 @@ export namespace main {
 	        this.autoReconnect = source["autoReconnect"];
 	    }
 	}
+	export class RunResult {
+	    server: string;
+	    name: string;
+	    state: string;
+	    exit: number;
+	    output: string;
+	    truncated?: boolean;
+	    ms: number;
+	    error?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new RunResult(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.server = source["server"];
+	        this.name = source["name"];
+	        this.state = source["state"];
+	        this.exit = source["exit"];
+	        this.output = source["output"];
+	        this.truncated = source["truncated"];
+	        this.ms = source["ms"];
+	        this.error = source["error"];
+	    }
+	}
+	export class SearchHit {
+	    path: string;
+	    line?: number;
+	    text?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new SearchHit(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.path = source["path"];
+	        this.line = source["line"];
+	        this.text = source["text"];
+	    }
+	}
 	export class TextFile {
 	    path: string;
 	    content: string;
@@ -616,6 +658,24 @@ export namespace store {
 		    }
 		    return a;
 		}
+	}
+	export class Snippet {
+	    id: string;
+	    name: string;
+	    command: string;
+	    note?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new Snippet(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.name = source["name"];
+	        this.command = source["command"];
+	        this.note = source["note"];
+	    }
 	}
 	
 	export class Task {

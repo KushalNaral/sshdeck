@@ -2,6 +2,7 @@ import { FitAddon } from '@xterm/addon-fit'
 import { SearchAddon } from '@xterm/addon-search'
 import { Terminal } from '@xterm/xterm'
 import { useEffect, useRef, useState } from 'react'
+import { shellQuote } from '../lib/paste'
 import type { Backend } from '../api'
 import type { ContainerTab, Server } from '../types'
 
@@ -9,12 +10,14 @@ interface Props {
   server: Server
   tab: number
   container?: ContainerTab
+  /** Change to this folder when the shell first opens. */
+  cwd?: string
   backend: Backend
   visible: boolean
 }
 
 /** One xterm instance per tab. Tabs stay mounted so switching is instant. */
-export function Term({ server, tab, container, backend, visible }: Props) {
+export function Term({ server, tab, container, cwd, backend, visible }: Props) {
   const host = useRef<HTMLDivElement>(null)
   const term = useRef<Terminal | null>(null)
   const fit = useRef<FitAddon | null>(null)
@@ -63,6 +66,7 @@ export function Term({ server, tab, container, backend, visible }: Props) {
     let detach = () => {}
     f.fit()
     // Opens (or re-opens) this tab's shell. After the link drops, the same call makes a fresh SSH session.
+    let first = true
     const begin = () => {
       setEnded(false)
       detach()
@@ -81,7 +85,12 @@ export function Term({ server, tab, container, backend, visible }: Props) {
             },
           ),
         )
-        .then((off) => (live ? (detach = off) : off()))
+        .then((off) => {
+          if (!live) return off()
+          detach = off
+          if (first && cwd) backend.write(server.id, tab, ` cd -- ${shellQuote(cwd)}\r`) // the leading space keeps it out of history where the shell allows
+          first = false
+        })
         .catch((e) => {
           if (!live) return
           t.write(`\r\n\x1b[31m${e instanceof Error ? e.message : String(e)}\x1b[0m\r\n`)
