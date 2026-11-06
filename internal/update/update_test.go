@@ -290,6 +290,31 @@ func TestApplyOnWindowsRenamesTheRunningExeAndCleansUpLater(t *testing.T) {
 	}
 }
 
+func TestApplyOnWindowsWorksWhenAnOldFileIsStillLocked(t *testing.T) {
+	dir := t.TempDir()
+	exe := filepath.Join(dir, "sshdeck.exe")
+	os.WriteFile(exe, []byte("old"), 0o755)
+	// A leftover .old that cannot be removed (on Windows: still running or held by a scanner). A non-empty folder
+	// of that name makes Remove fail here.
+	os.MkdirAll(filepath.Join(exe+".old", "held"), 0o755)
+	nb := filepath.Join(dir, ".sshdeck-update-1")
+	os.WriteFile(nb, []byte("new"), 0o755)
+	if err := Apply(nb, exe, "windows"); err != nil {
+		t.Fatalf("a stuck .old must not stop the update: %v", err)
+	}
+	if b, _ := os.ReadFile(exe); string(b) != "new" {
+		t.Errorf("exe = %q", b)
+	}
+	if left, _ := filepath.Glob(exe + ".*.old"); len(left) != 1 {
+		t.Errorf("the running program should have been moved aside under another name: %v", left)
+	}
+	os.RemoveAll(exe + ".old") // as if the lock had ended
+	CleanupOld(exe)
+	if left, _ := filepath.Glob(exe + ".*.old"); len(left) != 0 {
+		t.Errorf("CleanupOld should remove those too: %v", left)
+	}
+}
+
 func TestApplyIntoAFolderThatCannotBeWrittenSaysSo(t *testing.T) {
 	if os.Geteuid() == 0 {
 		t.Skip("root can write anywhere")

@@ -2677,6 +2677,7 @@ select.snip:focus-visible {
   display: grid;
   grid-template-rows: auto 1fr;
   background: var(--pane);
+  color: var(--ink);
   min-height: 0;
 }
 .logview[hidden] {

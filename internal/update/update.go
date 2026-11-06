@@ -406,8 +406,19 @@ func Apply(newPath, exe, goos string) error {
 		return os.Rename(newPath, exe)
 	}
 	old := exe + ".old"
-	_ = os.Remove(old)
-	if err := os.Rename(exe, old); err != nil {
+	if os.Remove(old) != nil && exists(old) {
+		// The last update's file is still held (it can be running, or a scanner has it open). Use another name
+		// rather than fail; CleanupOld clears these at a later start.
+		old = fmt.Sprintf("%s.%d.old", exe, time.Now().UnixNano())
+	}
+	var err error
+	for i := 0; i < 5; i++ { // a virus scanner looking at a fresh download holds it for a moment
+		if err = os.Rename(exe, old); err == nil {
+			break
+		}
+		time.Sleep(300 * time.Millisecond)
+	}
+	if err != nil {
 		return err
 	}
 	if err := os.Rename(newPath, exe); err != nil {
@@ -417,5 +428,14 @@ func Apply(newPath, exe, goos string) error {
 	return nil
 }
 
+func exists(p string) bool { _, err := os.Lstat(p); return err == nil }
+
 // CleanupOld removes the previous program left by a Windows update.
-func CleanupOld(exe string) { _ = os.Remove(filepath.Clean(exe) + ".old") }
+func CleanupOld(exe string) {
+	exe = filepath.Clean(exe)
+	_ = os.Remove(exe + ".old")
+	left, _ := filepath.Glob(exe + ".*.old")
+	for _, f := range left {
+		_ = os.Remove(f)
+	}
+}
