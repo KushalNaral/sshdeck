@@ -9,6 +9,8 @@ import { DiffView } from './DiffView'
 import { HistoryDrawer, type DiffPick } from './HistoryDrawer'
 
 interface Props {
+  /** Where the file is: the server id, or "serverId@container". */
+  target: string
   server: Server
   /** Whether the server has a live connection (needed to restore). */
   live: boolean
@@ -24,7 +26,7 @@ interface Props {
 type Conflict = 'changed' | null
 
 /** One file open in Monaco. It stays mounted (hidden) while another tab is in front, so edits and undo history survive. */
-export function Editor({ server, live, historyAsk, onCopy, path, backend, visible, onDirty }: Props) {
+export function Editor({ target, server, live, historyAsk, onCopy, path, backend, visible, onDirty }: Props) {
   const serverId = server.id
   const host = useRef<HTMLDivElement>(null)
   const ed = useRef<Monaco.editor.IStandaloneCodeEditor | null>(null)
@@ -94,7 +96,7 @@ export function Editor({ server, live, historyAsk, onCopy, path, backend, visibl
       setRev((r) => r + 1)
       setLang(languageFor(m, path))
       if (!ed.current && host.current) {
-        const model = m.editor.createModel(f.content, languageFor(m, path), m.Uri.parse(`sshdeck://${serverId}${path}`))
+        const model = m.editor.createModel(f.content, languageFor(m, path), m.Uri.parse(`sshdeck://${serverId.replace('@', '.')}${path}`))
         ed.current = m.editor.create(host.current, {
           model,
           theme: wantDark() ? 'sshdeck-dark' : 'sshdeck-light',
@@ -211,7 +213,7 @@ export function Editor({ server, live, historyAsk, onCopy, path, backend, visibl
           )}
         </div>
         {drawer && (
-          <HistoryDrawer server={server} path={path} backend={backend} rev={rev} current={() => ed.current?.getValue() ?? ''} live={live} noHistory={noHist} onPick={setDiff} onCopy={onCopy} onClose={() => (setDrawer(false), setDiff(null))} />
+          <HistoryDrawer server={server} target={target} path={path} backend={backend} rev={rev} current={() => ed.current?.getValue() ?? ''} live={live} noHistory={noHist} onPick={setDiff} onCopy={onCopy} onClose={() => (setDrawer(false), setDiff(null))} />
         )}
       </div>
       {state === 'loading' && <div className="empty"><strong>Opening {name}…</strong></div>}

@@ -4,8 +4,13 @@ import type { Server, Session } from '../types'
 import { Editor } from './Editor'
 import { Term } from './Term'
 
+/** What tells one open file from another: where it is and its path. */
+export const docKey = (sid: string, d: Doc) => `${d.target || sid}|${d.path}`
+
 export interface Doc {
   path: string
+  /** Where the file is: the server id, or "serverId@container". Empty means the server itself. */
+  target?: string
   dirty: boolean
   /** Counts up when something asks to open this file's history. */
   history?: number
@@ -22,9 +27,9 @@ interface Props {
   /** Files open in the editor, per server, and the one in front (null when a shell is). */
   docs: Record<string, Doc[]>
   activeDoc: Record<string, string | null>
-  onDoc: (serverId: string, path: string) => void
-  onCloseDoc: (serverId: string, path: string) => void
-  onDirty: (serverId: string, path: string, dirty: boolean) => void
+  onDoc: (serverId: string, key: string) => void
+  onCloseDoc: (serverId: string, key: string) => void
+  onDirty: (serverId: string, key: string, dirty: boolean) => void
   onHistoryCopy: (serverId: string, mode: '' | 'on' | 'off') => void
 }
 
@@ -55,9 +60,10 @@ export function TerminalPane({ servers, sessions, selected, backend, onTab, onAd
             </button>
           ))}
         {myDocs.map((d) => (
-          <button key={d.path} role="tab" aria-selected={front === d.path} onClick={() => onDoc(selected, d.path)} title={d.path}>
+          <button key={docKey(selected, d)} role="tab" aria-selected={front === docKey(selected, d)} onClick={() => onDoc(selected, docKey(selected, d))} title={`${d.target?.includes('@') ? d.target.split('@')[1] + ': ' : ''}${d.path}`}>
             <FileText size={14} strokeWidth={2} />
             <span>
+              {d.target?.includes('@') && <span className="dim">{d.target.split('@')[1]}: </span>}
               {d.path.slice(d.path.lastIndexOf('/') + 1)}
               {d.dirty && <span className="dot" role="img" aria-label="unsaved changes" />}
             </span>
@@ -66,7 +72,7 @@ export function TerminalPane({ servers, sessions, selected, backend, onTab, onAd
               aria-label={`Close ${d.path.slice(d.path.lastIndexOf('/') + 1)}`}
               onClick={(e) => {
                 e.stopPropagation()
-                onCloseDoc(selected, d.path)
+                onCloseDoc(selected, docKey(selected, d))
               }}
             >
               <X size={14} strokeWidth={2} />
@@ -84,7 +90,7 @@ export function TerminalPane({ servers, sessions, selected, backend, onTab, onAd
           const server = servers.find((x) => x.id === s.serverId)!
           return s.tabs.map((t) => <Term key={`${s.serverId}-${t}`} server={server} tab={t} container={s.tabInfo?.[t]} backend={backend} visible={s.serverId === selected && s.activeTab === t && !activeDoc[s.serverId]} />)
         })}
-        {Object.entries(docs).flatMap(([sid, list]) => list.map((d) => <Editor key={`${sid}:${d.path}`} server={servers.find((x) => x.id === sid)!} live={sessions[sid]?.state === 'live'} historyAsk={d.history ?? 0} onCopy={(m) => onHistoryCopy(sid, m)} path={d.path} backend={backend} visible={sid === selected && activeDoc[sid] === d.path} onDirty={(x) => onDirty(sid, d.path, x)} />))}
+        {Object.entries(docs).flatMap(([sid, list]) => list.map((d) => <Editor key={`${sid}:${docKey(sid, d)}`} target={d.target || sid} server={servers.find((x) => x.id === sid)!} live={sessions[sid]?.state === 'live'} historyAsk={d.history ?? 0} onCopy={(m) => onHistoryCopy(sid, m)} path={d.path} backend={backend} visible={sid === selected && activeDoc[sid] === docKey(sid, d)} onDirty={(x) => onDirty(sid, docKey(sid, d), x)} />))}
         {cur?.state !== 'live' && !front && (
           <div className="empty">
             <strong>{cur?.state === 'connecting' ? 'Opening the path to the shell…' : 'No shell open'}</strong>

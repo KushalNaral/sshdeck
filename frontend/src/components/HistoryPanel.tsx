@@ -2,15 +2,15 @@ import { RefreshCw } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { Backend } from '../api'
 import { ago, by, exact, KIND_LABEL, matches } from '../lib/history'
-import { basename, dirname } from '../lib/files'
+import { basename, dirname, splitHist, targetOf } from '../lib/files'
 import type { Version } from '../types'
 
 interface Props {
   serverId: string
   serverName: string
   backend: Backend
-  /** Opens a file's history in the editor. */
-  onOpen: (path: string) => void
+  /** Opens a file's history in the editor. target is the server id, or "serverId@container". */
+  onOpen: (target: string, path: string) => void
   live: boolean
 }
 
@@ -40,11 +40,13 @@ export function HistoryPanel({ serverId, serverName, backend, onOpen, live }: Pr
       <ol className="hfeed" aria-label={`Edits on ${serverName}`}>
         {rows === null && !err && <li className="hnone">Reading history…</li>}
         {rows?.length === 0 && <li className="hnone">Nothing edited through sshdeck on {serverName} yet. Open a file from the Files tab and save it.</li>}
-        {shown.map((v) => (
+        {shown.map((v) => {
+          const { container, path } = splitHist(v.path)
+          return (
           <li key={v.id}>
-            <button className="hrow" onClick={() => onOpen(v.path)} disabled={!live} title={live ? `Open the history of ${v.path}` : 'Connect to open files'}>
+            <button className="hrow" onClick={() => onOpen(targetOf(serverId, container), path)} disabled={!live} title={live ? `Open the history of ${v.path}` : 'Connect to open files'}>
               <span className="hfile">
-                <strong>{basename(v.path)}</strong> <span className="dim">{dirname(v.path)}</span>
+                <strong>{basename(path)}</strong> <span className="dim">{container ? `${container}: ` : ''}{dirname(path)}</span>
               </span>
               <span className="hby" data-kind={v.kind}>
                 {by(v)}
@@ -54,7 +56,8 @@ export function HistoryPanel({ serverId, serverName, backend, onOpen, live }: Pr
               </span>
             </button>
           </li>
-        ))}
+          )
+        })}
       </ol>
       {err && (
         <div className="notice bad" role="alert">

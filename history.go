@@ -66,7 +66,9 @@ func (a *App) denied(p string) bool {
 
 // track records content as the file's current text. author is "" for a change sshdeck did not make.
 // It never fails the caller's operation: a problem is only written to the audit trail.
-func (a *App) track(serverID, p string, kind history.Kind, author string, content []byte) {
+func (a *App) track(target, p string, kind history.Kind, author string, content []byte) {
+	serverID, ctr := splitTarget(target)
+	p = histPath(ctr, p)
 	hs := a.hist()
 	if hs == nil || a.denied(p) {
 		return
@@ -165,23 +167,26 @@ func (a *App) SetHistoryCopy(serverID, mode string) error {
 
 // noteCurrent compares what is on the server now with the newest recorded version. A file never seen before is
 // recorded as it is (so the first edit can be undone); a file that differs was changed by something else.
-func (a *App) noteCurrent(serverID, p string, content []byte) {
+func (a *App) noteCurrent(target, p string, content []byte) {
 	hs := a.hist()
 	if hs == nil || a.denied(p) {
 		return
 	}
-	if _, ok := hs.Latest(serverID, p); !ok {
-		a.track(serverID, p, history.Initial, "", content)
+	serverID, ctr := splitTarget(target)
+	if _, ok := hs.Latest(serverID, histPath(ctr, p)); !ok {
+		a.track(target, p, history.Initial, "", content)
 		return
 	}
-	a.track(serverID, p, history.Outside, "", content) // adds nothing when the text is the same
+	a.track(target, p, history.Outside, "", content) // adds nothing when the text is the same
 }
 
 // FileHistory lists the versions of one file, newest first. It needs no connection.
-func (a *App) FileHistory(serverID, p string) ([]history.Version, error) {
+func (a *App) FileHistory(target, p string) ([]history.Version, error) {
 	if err := a.guard(); err != nil {
 		return nil, err
 	}
+	serverID, ctr := splitTarget(target)
+	p = histPath(ctr, p)
 	if hs := a.hist(); hs != nil {
 		a.pull(serverID, p, hs)
 		return hs.List(serverID, p), nil
@@ -190,10 +195,11 @@ func (a *App) FileHistory(serverID, p string) ([]history.Version, error) {
 }
 
 // ServerHistory lists the latest edits across every file of a server: who changed what, and when.
-func (a *App) ServerHistory(serverID string, limit int) ([]history.Version, error) {
+func (a *App) ServerHistory(target string, limit int) ([]history.Version, error) {
 	if err := a.guard(); err != nil {
 		return nil, err
 	}
+	serverID, _ := splitTarget(target)
 	if hs := a.hist(); hs != nil {
 		a.pull(serverID, "", hs)
 		return hs.Recent(serverID, limit), nil
@@ -201,10 +207,11 @@ func (a *App) ServerHistory(serverID string, limit int) ([]history.Version, erro
 	return nil, nil
 }
 
-func (a *App) HistoryContent(serverID, versionID string) (string, error) {
+func (a *App) HistoryContent(target, versionID string) (string, error) {
 	if err := a.guard(); err != nil {
 		return "", err
 	}
+	serverID, _ := splitTarget(target)
 	hs := a.hist()
 	if hs == nil {
 		return "", errors.New("file history is off")
@@ -226,10 +233,11 @@ func (a *App) HistoryContent(serverID, versionID string) (string, error) {
 	return string(b), nil
 }
 
-func (a *App) PinVersion(serverID, versionID string, pinned bool, note string) error {
+func (a *App) PinVersion(target, versionID string, pinned bool, note string) error {
 	if err := a.guard(); err != nil {
 		return err
 	}
+	serverID, _ := splitTarget(target)
 	hs := a.hist()
 	if hs == nil {
 		return errors.New("file history is off")
@@ -239,12 +247,12 @@ func (a *App) PinVersion(serverID, versionID string, pinned bool, note string) e
 
 // RestoreVersion writes an older version back to the server. It is an ordinary save (so it is refused if the
 // file changed meanwhile and itself becomes a new version); history is never rewritten.
-func (a *App) RestoreVersion(serverID, p, versionID string) (string, error) {
-	text, err := a.HistoryContent(serverID, versionID)
+func (a *App) RestoreVersion(target, p, versionID string) (string, error) {
+	text, err := a.HistoryContent(target, versionID)
 	if err != nil {
 		return "", err
 	}
-	cl, err := a.ftp(serverID)
+	cl, err := a.fs(target)
 	if err != nil {
 		return "", err
 	}
@@ -252,17 +260,22 @@ func (a *App) RestoreVersion(serverID, p, versionID string) (string, error) {
 	if fi, err := cl.Stat(p); err == nil {
 		cur = versionOf(fi)
 	}
-	v, err := a.writeText(serverID, p, text, cur, history.Restore)
+	v, err := a.writeText(target, p, text, cur, history.Restore)
 	if err == nil {
-		a.audit("file.restore", a.serverName(serverID), p)
+		sid, ctr := splitTarget(target)
+		a.audit("file.restore", a.serverName(sid), histPath(ctr, p))
 	}
 	return v, err
 }
 
 // DeleteHistory forgets the history of one file, or of the whole server when p is empty.
-func (a *App) DeleteHistory(serverID, p string) error {
+func (a *App) DeleteHistory(target, p string) error {
 	if err := a.guard(); err != nil {
 		return err
+	}
+	serverID, ctr := splitTarget(target)
+	if p != "" {
+		p = histPath(ctr, p)
 	}
 	hs := a.hist()
 	if hs == nil {
@@ -316,4 +329,13 @@ func (a *App) SetHistorySettings(h HistorySettings) error {
 	a.mu.Unlock()
 	a.audit("settings.change", "", fmt.Sprintf("history off=%t keep=%d days=%d", h.Off, h.Keep, h.Days))
 	return saveSettings(a.settingsPath, s)
+}
+
+// auditName is the server's name in the audit trail, with the container when the file is in one.
+func (a *App) auditName(target string) string {
+	sid, ctr := splitTarget(target)
+	if ctr != "" {
+		return a.serverName(sid) + " / " + ctr
+	}
+	return a.serverName(sid)
 }

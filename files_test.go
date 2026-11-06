@@ -256,3 +256,10 @@ func TestCancelStopsATransfer(t *testing.T) {
 		t.Errorf("retry: %+v", ts)
 	}
 }
+
+// liveClientFor returns the fake SSH client behind a connected server.
+func (a *App) liveClientFor(id string) *fakeClient {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.conns[id].client.(*fakeClient)
+}

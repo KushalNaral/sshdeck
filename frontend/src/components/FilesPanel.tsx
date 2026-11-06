@@ -1,7 +1,7 @@
 import { ArrowDown, ArrowUp, History, Download, File as FileIcon, FilePlus, FileText, Folder, FolderPlus, FolderUp, Home, Link2, Pencil, RefreshCw, Trash2, Upload, X } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { Backend } from '../api'
-import { basename, crumbs, dirname, humanSize, join, shortDate, validName } from '../lib/files'
+import { basename, crumbs, dirname, humanSize, join, shortDate, targetOf, validName } from '../lib/files'
 import type { FileEntry, Listing, Policy, StartResult, Transfer } from '../types'
 import { clamp, LIMITS, DEFAULT, type Layout } from '../lib/layout'
 import { Confirm } from './Confirm'
@@ -12,10 +12,10 @@ interface Props {
   serverName: string
   live: boolean
   backend: Backend
-  /** Opens a file in the editor. */
-  onEdit: (path: string) => void
+  /** Opens a file in the editor. target is the server id, or "serverId@container". */
+  onEdit: (target: string, path: string) => void
   /** Opens the file in the editor with its history showing. */
-  onHistory: (path: string) => void
+  onHistory: (target: string, path: string) => void
   layout: Layout
   onLayout: (f: (l: Layout) => Layout) => void
 }
@@ -28,7 +28,18 @@ const TEXTY = /\.(txt|md|json|ya?ml|toml|ini|conf|cnf|env|log|php|js|ts|tsx|jsx|
 
 type SortKey = 'name' | 'size' | 'mtime'
 
-export function FilesPanel({ serverId, serverName, live, backend, onEdit, onHistory, layout, onLayout }: Props) {
+// The container each server's panel was showing (empty: the server itself).
+const lastCtr = new Map<string, string>()
+
+export function FilesPanel({ serverId: baseId, serverName, live, backend, onEdit, onHistory, layout, onLayout }: Props) {
+  const [ctr, setCtrState] = useState(lastCtr.get(baseId) ?? '')
+  const [ctrs, setCtrs] = useState<string[]>([])
+  useEffect(() => setCtrState(lastCtr.get(baseId) ?? ''), [baseId])
+  useEffect(() => {
+    setCtrs([])
+    if (live) void backend.files.containers(baseId).then(setCtrs).catch(() => setCtrs([]))
+  }, [backend, baseId, live])
+  const serverId = targetOf(baseId, ctr) // from here on, "serverId" is where the files are
   const [sort, setSort] = useState<{ key: SortKey; asc: boolean }>({ key: 'name', asc: true })
   const [list, setList] = useState<Listing | null>(null)
   const [error, setError] = useState('')
@@ -155,7 +166,7 @@ export function FilesPanel({ serverId, serverName, live, backend, onEdit, onHist
   }, [live])
 
   // ---- actions ----
-  const open = (e: FileEntry) => (e.dir ? void go(e.path) : onEdit(e.path))
+  const open = (e: FileEntry) => (e.dir ? void go(e.path) : onEdit(serverId, e.path))
   const startNew = (isNew: 'dir' | 'file') => setEditing({ path: join(cwd, ''), isNew })
   const commitEdit = async (name: string) => {
     const ed = editing
@@ -168,7 +179,7 @@ export function FilesPanel({ serverId, serverName, live, backend, onEdit, onHist
     if (ok) {
       await go(cwd)
       setSel([target])
-      if (ed.isNew === 'file') onEdit(target)
+      if (ed.isNew === 'file') onEdit(serverId, target)
     }
   }
   const remove = async () => {
@@ -232,6 +243,26 @@ export function FilesPanel({ serverId, serverName, live, backend, onEdit, onHist
   const active = transfers.filter((t) => t.state === 'queued' || t.state === 'running')
   return (
     <div className={`files${over ? ' dropping' : ''}`} ref={box} style={{ '--wails-drop-target': 'drop', '--c-size': `${layout.cols.size}px`, '--c-mod': `${layout.cols.modified}px` } as React.CSSProperties} onKeyDown={onKey}>
+      {(ctrs.length > 0 || ctr) && (
+        <label className="files-loc">
+          <span>Files in</span>
+          <select
+            value={ctr}
+            aria-label="Where to look: the server or one of its containers"
+            onChange={(e) => {
+              lastCtr.set(baseId, e.target.value)
+              setCtrState(e.target.value)
+            }}
+          >
+            <option value="">{serverName} (the server)</option>
+            {[...new Set([...ctrs, ...(ctr ? [ctr] : [])])].map((c) => (
+              <option key={c} value={c}>
+                Container {c}
+              </option>
+            ))}
+          </select>
+        </label>
+      )}
       <div className="files-bar">
         <button className="btn icon" onClick={() => void go(dirname(cwd))} disabled={!cwd || cwd === '/'} title="Up one folder (Backspace)" aria-label="Up one folder">
           <ArrowUp size={14} strokeWidth={2} />
@@ -279,7 +310,7 @@ export function FilesPanel({ serverId, serverName, live, backend, onEdit, onHist
         <button className="btn icon" onClick={() => setEditing({ path: chosen[0].path })} disabled={chosen.length !== 1} title="Rename (F2)" aria-label="Rename">
           <Pencil size={14} strokeWidth={2} />
         </button>
-        <button className="btn icon" onClick={() => onHistory(chosen[0].path)} disabled={chosen.length !== 1 || chosen[0].dir} title="History of the selected file" aria-label="History">
+        <button className="btn icon" onClick={() => onHistory(serverId, chosen[0].path)} disabled={chosen.length !== 1 || chosen[0].dir} title="History of the selected file" aria-label="History">
           <History size={14} strokeWidth={2} />
         </button>
         <button className="btn icon" onClick={() => setDel(chosen.map((c) => c.path))} disabled={noPick} title="Delete (Del)" aria-label="Delete">

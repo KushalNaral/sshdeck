@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"path/filepath"
@@ -176,6 +177,9 @@ type Client interface {
 	// Run runs one command and returns its stdout. A non-zero exit is an error that still carries what was printed.
 	// Cancelling ctx ends only this command, not the connection.
 	Run(ctx context.Context, cmd string) (string, error)
+	// Exec runs a command with the given input and output (either may be nil). A failure carries the command's
+	// error output. Cancelling ctx ends only this command.
+	Exec(ctx context.Context, cmd string, stdin io.Reader, stdout io.Writer) error
 	// SFTP returns the connection's file-transfer client, opened on first use and shared by every caller.
 	SFTP() (*sftp.Client, error)
 	// Done is closed when the connection has ended, whether by Close, a keepalive failure or the server.
@@ -271,6 +275,39 @@ func (k *client) Shell(ctx context.Context) (Session, error) {
 		}
 	}()
 	return x, nil
+}
+
+// tail keeps the last few KB written to it: enough of a command's error output to show.
+type tail struct{ b []byte }
+
+func (t *tail) Write(p []byte) (int, error) {
+	t.b = append(t.b, p...)
+	if len(t.b) > 4096 {
+		t.b = t.b[len(t.b)-4096:]
+	}
+	return len(p), nil
+}
+
+func (k *client) Exec(ctx context.Context, cmd string, stdin io.Reader, stdout io.Writer) error {
+	s, err := k.c.NewSession()
+	if err != nil {
+		return err
+	}
+	defer s.Close()
+	stop := context.AfterFunc(ctx, func() { s.Close() })
+	defer stop()
+	var errs tail
+	s.Stdin, s.Stdout, s.Stderr = stdin, stdout, &errs
+	err = s.Run(cmd)
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+	if err != nil {
+		if m := strings.TrimSpace(string(errs.b)); m != "" {
+			return errors.New(m)
+		}
+	}
+	return err
 }
 
 func (k *client) Run(ctx context.Context, cmd string) (string, error) {

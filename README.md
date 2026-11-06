@@ -12,6 +12,7 @@ one is needed, logs in over SSH and opens a terminal. It also reads each server 
   Linux client, so you connect it yourself and confirm in the app.
 - `docker exec` shells inside containers
 - Files tab: browse a server over SFTP, upload and download with drag and drop, and edit files in an editor tab
+- Files and the editor work inside running Docker containers too
 - File history: every save keeps the old text, with who changed it and when, so you can compare and restore
 - Panels you can resize, hide and dock
 - Read-only scan of each server: OS, memory, disks, failed services, containers and software versions
@@ -70,6 +71,10 @@ has the settings and a delete button.
 
 Drag the borders between panels to resize them, Ctrl+B hides the server list, Ctrl+. hides the side panel, and
 "Dock" moves the side panel next to the server list. "Reset layout" puts everything back.
+
+When the server runs containers, the Files tab gets a picker at the top: choose a container and the same browser,
+uploads and editor work on its files. As root it goes through the host's `/proc`; otherwise it uses `docker exec`.
+Saved files keep their owner and permissions.
 
 The passphrase lock is in Admin, Security. There is no recovery if the passphrase is lost.
 

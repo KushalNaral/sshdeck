@@ -13,7 +13,7 @@ import { ConnectBar } from './components/ConnectBar'
 import { TasksBoard } from './components/TasksBoard'
 import { Palette } from './components/Palette'
 import { Rack } from './components/Rack'
-import { TerminalPane, type Doc } from './components/TerminalPane'
+import { TerminalPane, docKey, type Doc } from './components/TerminalPane'
 import { FilesPanel } from './components/FilesPanel'
 import { HistoryPanel } from './components/HistoryPanel'
 import { auditApi } from './lib/audit'
@@ -217,24 +217,26 @@ export default function App() {
   const [docs, setDocs] = useState<Record<string, Doc[]>>({})
   const [activeDoc, setActiveDoc] = useState<Record<string, string | null>>({})
   const [side, setSide] = useState<'analysis' | 'files' | 'history'>('analysis')
-  const openDoc = (id: string, path: string, history = false) => {
+  const openDoc = (id: string, path: string, history = false, target = id) => {
+    const key = docKey(id, { path, target, dirty: false })
     setDocs((d) => {
       const list = d[id] ?? []
-      if (!list.some((x) => x.path === path)) return { ...d, [id]: [...list, { path, dirty: false, history: history ? 1 : 0 }] }
-      return history ? { ...d, [id]: list.map((x) => (x.path === path ? { ...x, history: (x.history ?? 0) + 1 } : x)) } : d
+      if (!list.some((x) => docKey(id, x) === key)) return { ...d, [id]: [...list, { path, target, dirty: false, history: history ? 1 : 0 }] }
+      return history ? { ...d, [id]: list.map((x) => (docKey(id, x) === key ? { ...x, history: (x.history ?? 0) + 1 } : x)) } : d
     })
-    setActiveDoc((a) => ({ ...a, [id]: path }))
+    setActiveDoc((a) => ({ ...a, [id]: key }))
   }
   const docsRef = useRef(docs)
   docsRef.current = docs
-  const dropDoc = (id: string, path: string) => {
-    const rest = (docsRef.current[id] ?? []).filter((x) => x.path !== path)
+  const dropDoc = (id: string, key: string) => {
+    const rest = (docsRef.current[id] ?? []).filter((x) => docKey(id, x) !== key)
     setDocs((d) => ({ ...d, [id]: rest }))
-    setActiveDoc((a) => (a[id] === path ? { ...a, [id]: rest.length ? rest[rest.length - 1].path : null } : a))
+    setActiveDoc((a) => (a[id] === key ? { ...a, [id]: rest.length ? docKey(id, rest[rest.length - 1]) : null } : a))
   }
-  const closeDoc = (id: string, path: string) => {
-    if (!docs[id]?.find((x) => x.path === path)?.dirty) return dropDoc(id, path)
-    setAsk({ title: `Close ${path.slice(path.lastIndexOf('/') + 1)} without saving?`, body: 'Your changes to this file will be lost.', label: 'Discard changes', run: () => dropDoc(id, path) })
+  const closeDoc = (id: string, key: string) => {
+    const d = docs[id]?.find((x) => docKey(id, x) === key)
+    if (!d?.dirty) return dropDoc(id, key)
+    setAsk({ title: `Close ${d.path.slice(d.path.lastIndexOf('/') + 1)} without saving?`, body: 'Your changes to this file will be lost.', label: 'Discard changes', run: () => dropDoc(id, key) })
   }
   const closeTab = (id: string, tab: number) =>
     patch(id, (s) => {
@@ -460,7 +462,7 @@ export default function App() {
             onDoc={(id, path) => setActiveDoc((a) => ({ ...a, [id]: path }))}
             onCloseDoc={closeDoc}
             onHistoryCopy={(id, mode) => void attempt(async () => { await backend.history.setCopy(id, mode); setConfig((c) => ({ ...c, servers: c.servers.map((x) => (x.id === id ? { ...x, historyCopy: mode } : x)) })) })}
-            onDirty={(id, path, dirty) => setDocs((d) => ({ ...d, [id]: (d[id] ?? []).map((x) => (x.path === path && x.dirty !== dirty ? { ...x, dirty } : x)) }))}
+            onDirty={(id, key, dirty) => setDocs((d) => ({ ...d, [id]: (d[id] ?? []).map((x) => (docKey(id, x) === key && x.dirty !== dirty ? { ...x, dirty } : x)) }))}
             onAddTab={addTab}
             onCloseTab={closeTab}
           />
@@ -480,9 +482,9 @@ export default function App() {
             </button>
           </div>
           {side === 'history' ? (
-            <HistoryPanel serverId={selected} serverName={server.name} backend={backend} live={live} onOpen={(p) => openDoc(selected, p, true)} />
+            <HistoryPanel serverId={selected} serverName={server.name} backend={backend} live={live} onOpen={(t, p) => openDoc(selected, p, true, t)} />
           ) : side === 'files' ? (
-            <FilesPanel serverId={selected} serverName={server.name} live={live} backend={backend} onEdit={(p) => openDoc(selected, p)} onHistory={(p) => openDoc(selected, p, true)} layout={layout} onLayout={setLayout} />
+            <FilesPanel serverId={selected} serverName={server.name} live={live} backend={backend} onEdit={(t, p) => openDoc(selected, p, false, t)} onHistory={(t, p) => openDoc(selected, p, true, t)} layout={layout} onLayout={setLayout} />
           ) : (
             <Analysis server={server} triage={levels[server.id]} data={analysis[selected]} scanning={scanning === selected} error={scanErrors[selected]} connected={live} onExec={(c) => requestExec(selected, c)} onRescan={() => void scan(selected)} onTrack={(n, v) => trackSoftware(selected, n, v)} onCopySsh={() => attempt(() => configStore.copySSH(selected))} connection={<Connection server={server} vpns={vpns} session={sess} />} logins={<Logins server={server} onCopy={(l, f) => attempt(() => configStore.copyLogin(selected, l.id, f))} />} />
           )}

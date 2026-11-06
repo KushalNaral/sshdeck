@@ -17,6 +17,7 @@ const go = async <T>(p: Promise<T>): Promise<T> => {
 }
 
 const files: FilesApi = {
+  containers: async (s) => ((await go(App.Containers(s))) ?? []) as string[],
   list: (s, d) => go(App.ListDir(s, d)) as Promise<Listing>,
   read: (s, p) => go(App.ReadText(s, p)),
   write: (s, p, c, v) => go(App.WriteText(s, p, c, v)),

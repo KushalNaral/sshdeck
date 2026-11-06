@@ -4,6 +4,7 @@ package main
 // transfers.go. Paths on the server are always slash paths; paths on this machine use the OS separator.
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -12,11 +13,13 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"github.com/pkg/sftp"
 
 	"github.com/KushalNaral/sshdeck/internal/history"
+	"github.com/KushalNaral/sshdeck/internal/sshx"
 )
 
 // maxEdit is the biggest file the editor opens; bigger files are for download, not for a text widget.
@@ -46,14 +49,14 @@ type TextFile struct {
 	NoHistory bool `json:"noHistory,omitempty"`
 }
 
-// ftp returns the SFTP client of a live connection.
-func (a *App) ftp(serverID string) (*sftp.Client, error) {
+// live returns the SSH client of a connected server.
+func (a *App) live(serverID string) (sshx.Client, error) {
 	if err := a.guard(); err != nil {
 		return nil, err
 	}
 	a.mu.Lock()
 	c := a.conns[serverID]
-	var cl interface{ SFTP() (*sftp.Client, error) }
+	var cl sshx.Client
 	if c != nil && c.client != nil {
 		select {
 		case <-c.client.Done():
@@ -65,7 +68,81 @@ func (a *App) ftp(serverID string) (*sftp.Client, error) {
 	if cl == nil {
 		return nil, errors.New("not connected")
 	}
+	return cl, nil
+}
+
+// ftp returns the SFTP client of a live connection (the server's own files).
+func (a *App) ftp(serverID string) (*sftp.Client, error) {
+	cl, err := a.live(serverID)
+	if err != nil {
+		return nil, err
+	}
 	return cl.SFTP()
+}
+
+type cfsEntry struct {
+	host *sftp.Client
+	fs   fsys
+	at   time.Time
+}
+
+// fs returns the file operations for a target: a server id for the server itself, or "serverID@container".
+// How a container is reached is worked out once and kept for a short while.
+func (a *App) fs(target string) (fsys, error) {
+	sid, ctr := splitTarget(target)
+	cl, err := a.live(sid)
+	if err != nil {
+		return nil, err
+	}
+	host, err := cl.SFTP()
+	if err != nil {
+		return nil, err
+	}
+	if ctr == "" {
+		return sftpFS{host}, nil
+	}
+	a.mu.Lock()
+	e, ok := a.cfs[target]
+	a.mu.Unlock()
+	if ok && e.host == host && time.Since(e.at) < 30*time.Second {
+		return e.fs, nil
+	}
+	f, err := a.containerFS(host, cl, ctr)
+	if err != nil {
+		return nil, err
+	}
+	a.mu.Lock()
+	if a.cfs == nil {
+		a.cfs = map[string]cfsEntry{}
+	}
+	a.cfs[target] = cfsEntry{host: host, fs: f, at: time.Now()}
+	a.mu.Unlock()
+	return f, nil
+}
+
+// Containers lists the running containers of a connected server, for the Files tab's location picker.
+func (a *App) Containers(serverID string) ([]string, error) {
+	cl, err := a.live(serverID)
+	if err != nil {
+		return nil, err
+	}
+	ctx, cancel := context.WithTimeout(a.ctx, 20*time.Second)
+	defer cancel()
+	var out strings.Builder
+	if err := cl.Exec(ctx, "docker ps --format '{{.Names}}'", nil, &out); err != nil {
+		out.Reset()
+		if err2 := cl.Exec(ctx, "sudo -n docker ps --format '{{.Names}}'", nil, &out); err2 != nil {
+			return nil, errors.New("docker is not available to this login")
+		}
+	}
+	var names []string
+	for _, n := range strings.Fields(out.String()) {
+		if containerRe.MatchString(n) {
+			names = append(names, n)
+		}
+	}
+	sort.Strings(names)
+	return names, nil
 }
 
 func checkRemote(p string) error {
@@ -77,7 +154,7 @@ func checkRemote(p string) error {
 
 // ListDir lists a folder. An empty dir means the login's home folder. The reply carries the resolved path.
 func (a *App) ListDir(serverID, dir string) (Listing, error) {
-	cl, err := a.ftp(serverID)
+	cl, err := a.fs(serverID)
 	if err != nil {
 		return Listing{}, err
 	}
@@ -144,7 +221,7 @@ func versionOf(fi os.FileInfo) string {
 
 // ReadText opens a file for the editor. Large files and files that are not UTF-8 text are refused.
 func (a *App) ReadText(serverID, p string) (TextFile, error) {
-	cl, err := a.ftp(serverID)
+	cl, err := a.fs(serverID)
 	if err != nil {
 		return TextFile{}, err
 	}
@@ -173,7 +250,7 @@ func (a *App) ReadText(serverID, p string) (TextFile, error) {
 	if len(b) > maxEdit || !utf8.Valid(b) || strings.ContainsRune(string(b), 0) {
 		return TextFile{}, errors.New("this does not look like a text file. Download it instead")
 	}
-	a.audit("file.open", a.serverName(serverID), p)
+	a.audit("file.open", a.auditName(serverID), p)
 	a.noteCurrent(serverID, p, b)
 	return TextFile{Path: p, Content: string(b), Version: versionOf(fi), Mode: perm(fi.Mode()), NoHistory: a.hist() == nil || a.denied(p)}, nil
 }
@@ -199,7 +276,7 @@ func (a *App) WriteText(serverID, p, content, version string) (string, error) {
 }
 
 func (a *App) writeText(serverID, p, content, version string, kind history.Kind) (string, error) {
-	cl, err := a.ftp(serverID)
+	cl, err := a.fs(serverID)
 	if err != nil {
 		return "", err
 	}
@@ -217,13 +294,16 @@ func (a *App) writeText(serverID, p, content, version string, kind history.Kind)
 	}
 	a.snapshotBefore(serverID, cl, p)
 	tmp := p + ".sshdeck-part"
-	f, err := cl.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_TRUNC)
-	if err != nil { // no room to create a neighbour (a read-only folder): write the file itself
-		f, err = cl.OpenFile(p, os.O_WRONLY|os.O_CREATE|os.O_TRUNC)
-		if err != nil {
+	var f io.WriteCloser
+	if cl.InPlace() { // in a container, keep the file's owner and mode
+		tmp = ""
+	} else if f, err = cl.Create(tmp); err != nil { // no room to create a neighbour (a read-only folder): write the file itself
+		tmp = ""
+	}
+	if tmp == "" {
+		if f, err = cl.Create(p); err != nil {
 			return "", friendly(err, p)
 		}
-		tmp = ""
 	}
 	_, werr := io.WriteString(f, content)
 	if cerr := f.Close(); werr == nil {
@@ -246,13 +326,13 @@ func (a *App) writeText(serverID, p, content, version string, kind history.Kind)
 	if err != nil {
 		return "", err
 	}
-	a.audit("file.save", a.serverName(serverID), p)
+	a.audit("file.save", a.auditName(serverID), p)
 	a.track(serverID, p, kind, who(), []byte(content))
 	return versionOf(fi), nil
 }
 
 // snapshotBefore keeps what is on the server right now, so a save can always be undone, even the first one.
-func (a *App) snapshotBefore(serverID string, cl *sftp.Client, p string) {
+func (a *App) snapshotBefore(serverID string, cl fsys, p string) {
 	if a.hist() == nil || a.denied(p) {
 		return
 	}
@@ -269,7 +349,7 @@ func (a *App) snapshotBefore(serverID string, cl *sftp.Client, p string) {
 }
 
 // replace renames from over to, atomically when the server supports it.
-func replace(cl *sftp.Client, from, to string) error {
+func replace(cl fsys, from, to string) error {
 	if err := cl.PosixRename(from, to); err == nil {
 		return nil
 	}
@@ -278,7 +358,7 @@ func replace(cl *sftp.Client, from, to string) error {
 }
 
 func (a *App) Mkdir(serverID, p string) error {
-	cl, err := a.ftp(serverID)
+	cl, err := a.fs(serverID)
 	if err != nil {
 		return err
 	}
@@ -288,34 +368,36 @@ func (a *App) Mkdir(serverID, p string) error {
 	if err := cl.Mkdir(p); err != nil {
 		return friendly(err, p)
 	}
-	a.audit("file.mkdir", a.serverName(serverID), p)
+	a.audit("file.mkdir", a.auditName(serverID), p)
 	return nil
 }
 
 // NewFile creates an empty file, failing if the name is taken.
 func (a *App) NewFile(serverID, p string) error {
-	cl, err := a.ftp(serverID)
+	cl, err := a.fs(serverID)
 	if err != nil {
 		return err
 	}
 	if err := checkRemote(p); err != nil {
 		return err
 	}
-	f, err := cl.OpenFile(p, os.O_WRONLY|os.O_CREATE|os.O_EXCL)
+	f, err := cl.CreateNew(p)
+	if err == nil {
+		err = f.Close() // in a container the command's error only arrives on close
+	}
 	if err != nil {
 		if _, serr := cl.Stat(p); serr == nil {
 			return fmt.Errorf("%s already exists", path.Base(p))
 		}
 		return friendly(err, p)
 	}
-	f.Close()
-	a.audit("file.create", a.serverName(serverID), p)
+	a.audit("file.create", a.auditName(serverID), p)
 	return nil
 }
 
 // Rename moves a file or folder. It never replaces something that is already at the new path.
 func (a *App) Rename(serverID, from, to string) error {
-	cl, err := a.ftp(serverID)
+	cl, err := a.fs(serverID)
 	if err != nil {
 		return err
 	}
@@ -328,13 +410,13 @@ func (a *App) Rename(serverID, from, to string) error {
 	if err := cl.Rename(from, to); err != nil {
 		return friendly(err, from)
 	}
-	a.audit("file.rename", a.serverName(serverID), from+" -> "+to)
+	a.audit("file.rename", a.auditName(serverID), from+" -> "+to)
 	return nil
 }
 
 // Delete removes files and folders, folders with everything inside. The UI asks first.
 func (a *App) Delete(serverID string, paths []string) error {
-	cl, err := a.ftp(serverID)
+	cl, err := a.fs(serverID)
 	if err != nil {
 		return err
 	}
@@ -350,7 +432,7 @@ func (a *App) Delete(serverID string, paths []string) error {
 		if err := cl.RemoveAll(p); err != nil {
 			return friendly(err, p)
 		}
-		a.audit("file.delete", a.serverName(serverID), p)
+		a.audit("file.delete", a.auditName(serverID), p)
 	}
 	return nil
 }

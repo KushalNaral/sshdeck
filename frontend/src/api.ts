@@ -4,6 +4,9 @@ import { mockFiles, mockHistory } from './mockFiles'
 /** Everything the UI needs from the Go side. The Wails bindings will implement this same shape. */
 /** Files on the server (SFTP) and the transfer queue. Every call needs a live connection. */
 export interface FilesApi {
+  /** Running containers on the server, for the location picker. Rejects when docker is not available. */
+  containers(serverId: string): Promise<string[]>
+  // In every call below, serverId may be "server@container" to work inside that container.
   list(serverId: string, dir: string): Promise<Listing>
   read(serverId: string, path: string): Promise<TextFile>
   /** Returns the new version. Rejects with a message containing "changed on the server" when someone else saved first. */

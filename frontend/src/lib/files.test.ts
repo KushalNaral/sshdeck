@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { basename, crumbs, dirname, humanSize, join, shortDate, validName } from './files'
+import { basename, crumbs, dirname, humanSize, join, shortDate, splitHist, targetOf, validName } from './files'
 
 describe('files helpers', () => {
   it('splits and joins slash paths', () => {
@@ -29,5 +29,12 @@ describe('files helpers', () => {
     expect(validName('a/b')).not.toBeNull()
     expect(validName('..')).not.toBeNull()
     expect(validName('notes.md')).toBeNull()
+  })
+  it('tells container files from the server\'s own in history', () => {
+    expect(splitHist('docker:web:/etc/app.env')).toEqual({ container: 'web', path: '/etc/app.env' })
+    expect(splitHist('/etc/hosts')).toEqual({ container: '', path: '/etc/hosts' })
+    expect(splitHist('docker:bad name:/x')).toEqual({ container: '', path: 'docker:bad name:/x' })
+    expect(targetOf('srv', '')).toBe('srv')
+    expect(targetOf('srv', 'web')).toBe('srv@web')
   })
 })

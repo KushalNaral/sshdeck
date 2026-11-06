@@ -48,6 +48,7 @@ type App struct {
 	// File transfers (files.go).
 	xmu      sync.Mutex
 	xfers    []*xfer
+	cfs      map[string]cfsEntry // how each container's files are reached (files.go)
 	xseq     int
 	xsem     chan struct{}
 	dial     func(ctx context.Context, srv store.Server, secret string) (sshx.Client, error)

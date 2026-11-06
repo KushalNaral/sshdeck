@@ -46,6 +46,10 @@ export function Connect(arg1) {
   return window['go']['main']['App']['Connect'](arg1);
 }
 
+export function Containers(arg1) {
+  return window['go']['main']['App']['Containers'](arg1);
+}
+
 export function CopyLogin(arg1, arg2, arg3) {
   return window['go']['main']['App']['CopyLogin'](arg1, arg2, arg3);
 }

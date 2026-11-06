@@ -16,7 +16,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/pkg/sftp"
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
@@ -136,7 +135,7 @@ func (a *App) drive(ctx context.Context, x *xfer) {
 	if x.Up {
 		verb = "file.upload"
 	}
-	a.audit(verb, a.serverName(x.ServerID), x.Name+" "+x.State)
+	a.audit(verb, a.auditName(x.ServerID), x.Name+" "+x.State)
 }
 
 func (a *App) setState(x *xfer, s, msg string) {
@@ -223,7 +222,7 @@ func (a *App) copyCtx(ctx context.Context, x *xfer, dst io.Writer, src io.Reader
 
 // Upload queues local files and folders to be copied into the server folder remoteDir.
 func (a *App) Upload(serverID, remoteDir string, locals []string, policy string) (UploadResult, error) {
-	cl, err := a.ftp(serverID)
+	cl, err := a.fs(serverID)
 	if err != nil {
 		return UploadResult{}, err
 	}
@@ -257,7 +256,7 @@ func (a *App) Upload(serverID, remoteDir string, locals []string, policy string)
 	return res, nil
 }
 
-func (a *App) uploadTree(ctx context.Context, x *xfer, cl *sftp.Client, local, dest string) error {
+func (a *App) uploadTree(ctx context.Context, x *xfer, cl fsys, local, dest string) error {
 	fi, err := os.Stat(local)
 	if err != nil {
 		return err
@@ -298,14 +297,17 @@ func (a *App) uploadTree(ctx context.Context, x *xfer, cl *sftp.Client, local, d
 	})
 }
 
-func (a *App) putFile(ctx context.Context, x *xfer, cl *sftp.Client, local, dest string, mode os.FileMode) error {
+func (a *App) putFile(ctx context.Context, x *xfer, cl fsys, local, dest string, mode os.FileMode) error {
 	src, err := os.Open(local)
 	if err != nil {
 		return err
 	}
 	defer src.Close()
 	tmp := dest + ".sshdeck-part"
-	dst, err := cl.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_TRUNC)
+	if cl.InPlace() { // a container: write the file itself, so an existing one keeps its owner
+		tmp = dest
+	}
+	dst, err := cl.Create(tmp)
 	if err != nil {
 		return friendly(err, dest)
 	}
@@ -316,6 +318,9 @@ func (a *App) putFile(ctx context.Context, x *xfer, cl *sftp.Client, local, dest
 	if err != nil {
 		cl.Remove(tmp)
 		return err
+	}
+	if tmp == dest {
+		return nil
 	}
 	cl.Chmod(tmp, mode)
 	if err := replace(cl, tmp, dest); err != nil {
@@ -329,7 +334,7 @@ func (a *App) putFile(ctx context.Context, x *xfer, cl *sftp.Client, local, dest
 
 // Download queues server files and folders to be copied into the local folder dir.
 func (a *App) Download(serverID string, remotes []string, dir, policy string) (UploadResult, error) {
-	cl, err := a.ftp(serverID)
+	cl, err := a.fs(serverID)
 	if err != nil {
 		return UploadResult{}, err
 	}
@@ -364,11 +369,11 @@ func (a *App) Download(serverID string, remotes []string, dir, policy string) (U
 	return res, nil
 }
 
-func (a *App) queueDownload(serverID string, cl *sftp.Client, remote, local, name string) {
+func (a *App) queueDownload(serverID string, cl fsys, remote, local, name string) {
 	a.enqueue(serverID, name, false, func(ctx context.Context, x *xfer) error { return a.downloadTree(ctx, x, cl, remote, local) })
 }
 
-func (a *App) downloadTree(ctx context.Context, x *xfer, cl *sftp.Client, remote, local string) error {
+func (a *App) downloadTree(ctx context.Context, x *xfer, cl fsys, remote, local string) error {
 	fi, err := cl.Stat(remote)
 	if err != nil {
 		return friendly(err, remote)
@@ -378,46 +383,30 @@ func (a *App) downloadTree(ctx context.Context, x *xfer, cl *sftp.Client, remote
 		return a.getFile(ctx, x, cl, remote, local)
 	}
 	var total int64
-	for w := cl.Walk(remote); w.Step(); {
-		if w.Err() == nil && w.Stat() != nil && w.Stat().Mode().IsRegular() {
-			total += w.Stat().Size()
+	walk(cl, remote, func(_ string, fi os.FileInfo) error {
+		if fi.Mode().IsRegular() {
+			total += fi.Size()
 		}
-	}
+		return nil
+	})
 	x.total.Store(total)
-	for w := cl.Walk(remote); w.Step(); {
+	return walk(cl, remote, func(p string, fi os.FileInfo) error {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		if w.Err() != nil {
-			return w.Err()
-		}
-		rel := strings.TrimPrefix(strings.TrimPrefix(w.Path(), remote), "/")
-		parts := strings.Split(rel, "/")
-		ok := true
-		for _, p := range parts {
-			if rel != "" && !safeName(p) {
-				ok = false
-			}
-		}
-		if !ok {
-			continue // a name that would climb out of the chosen folder
-		}
+		rel := strings.TrimPrefix(strings.TrimPrefix(p, remote), "/")
 		target := filepath.Join(local, filepath.FromSlash(rel))
-		switch st := w.Stat(); {
-		case st.IsDir():
-			if err := os.MkdirAll(target, 0o700); err != nil {
-				return err
-			}
-		case st.Mode().IsRegular():
-			if err := a.getFile(ctx, x, cl, w.Path(), target); err != nil {
-				return err
-			}
+		switch {
+		case fi.IsDir():
+			return os.MkdirAll(target, 0o700)
+		case fi.Mode().IsRegular():
+			return a.getFile(ctx, x, cl, p, target)
 		}
-	}
-	return nil
+		return nil
+	})
 }
 
-func (a *App) getFile(ctx context.Context, x *xfer, cl *sftp.Client, remote, local string) error {
+func (a *App) getFile(ctx context.Context, x *xfer, cl fsys, remote, local string) error {
 	src, err := cl.Open(remote)
 	if err != nil {
 		return friendly(err, remote)
@@ -445,7 +434,7 @@ func (a *App) getFile(ctx context.Context, x *xfer, cl *sftp.Client, remote, loc
 
 // PickUpload asks for files (or a folder) on this machine, then uploads them to remoteDir.
 func (a *App) PickUpload(serverID, remoteDir string, folder bool) (UploadResult, error) {
-	if _, err := a.ftp(serverID); err != nil {
+	if _, err := a.fs(serverID); err != nil {
 		return UploadResult{}, err
 	}
 	var picks []string
@@ -471,7 +460,7 @@ func (a *App) PickUpload(serverID, remoteDir string, folder bool) (UploadResult,
 // PickDownload asks where to put remotes, then downloads them. One plain file gets a Save dialog; anything
 // else asks for a folder.
 func (a *App) PickDownload(serverID string, remotes []string) (UploadResult, error) {
-	cl, err := a.ftp(serverID)
+	cl, err := a.fs(serverID)
 	if err != nil {
 		return UploadResult{}, err
 	}

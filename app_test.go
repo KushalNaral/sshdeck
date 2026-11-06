@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"errors"
+	"io"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -147,6 +148,14 @@ type fakeClient struct {
 	shells int
 	runs   []string
 	ftp    *sftp.Client
+	exec   func(ctx context.Context, cmd string, stdin io.Reader, stdout io.Writer) error
+}
+
+func (f *fakeClient) Exec(ctx context.Context, cmd string, stdin io.Reader, stdout io.Writer) error {
+	if f.exec == nil {
+		return errors.New("no exec")
+	}
+	return f.exec(ctx, cmd, stdin, stdout)
 }
 
 func (f *fakeClient) SFTP() (*sftp.Client, error) {

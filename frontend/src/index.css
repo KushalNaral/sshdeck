@@ -2387,3 +2387,32 @@ progress::-webkit-progress-value {
   overflow: hidden;
   clip-path: inset(50%);
 }
+
+.files-loc {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px;
+  background: var(--cmd);
+  border-bottom: 1px solid var(--cmd-line);
+}
+
+.files-loc select {
+  flex: 1;
+  min-width: 0;
+  height: 24px;
+  font: inherit;
+  color: var(--ink);
+  background: var(--pane);
+  border: 1px solid var(--input-line);
+  border-radius: 2px;
+}
+
+.files-loc select:hover {
+  border-color: var(--input-hover);
+}
+
+.files-loc select:focus-visible {
+  outline: 1px solid var(--focus);
+  border-color: var(--focus);
+}

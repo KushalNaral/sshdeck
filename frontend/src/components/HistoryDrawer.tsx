@@ -13,6 +13,8 @@ export interface DiffPick {
 }
 
 interface Props {
+  /** Where the file is: the server id, or "serverId@container". */
+  target: string
   server: Server
   path: string
   backend: Backend
@@ -28,7 +30,7 @@ interface Props {
 }
 
 /** The versions of one file, newest first. Click one to see what changed against the editor; shift-click a second to compare two. */
-export function HistoryDrawer({ server, path, backend, rev, current, live, noHistory, onPick, onCopy, onClose }: Props) {
+export function HistoryDrawer({ target, server, path, backend, rev, current, live, noHistory, onPick, onCopy, onClose }: Props) {
   const [list, setList] = useState<Version[] | null>(null)
   const [err, setErr] = useState('')
   const [q, setQ] = useState('')
@@ -39,11 +41,11 @@ export function HistoryDrawer({ server, path, backend, rev, current, live, noHis
   const load = useCallback(async () => {
     try {
       setErr('')
-      setList(await backend.history.file(server.id, path))
+      setList(await backend.history.file(target, path))
     } catch (e) {
       setErr(e instanceof Error ? e.message : String(e))
     }
-  }, [backend, server.id, path])
+  }, [backend, target, path])
   useEffect(() => void load(), [load, rev])
   useEffect(() => (setSel([]), onPick(null)), [path, rev]) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -58,7 +60,7 @@ export function HistoryDrawer({ server, path, backend, rev, current, live, noHis
     setBusy(true)
     try {
       const vs = next.map((id) => byId.get(id)!).sort((x, y) => x.time - y.time)
-      const texts = await Promise.all(vs.map((x) => backend.history.content(server.id, x.id)))
+      const texts = await Promise.all(vs.map((x) => backend.history.content(target, x.id)))
       if (vs.length === 2) onPick({ a: { label: label(vs[0]), text: texts[0] }, b: { label: label(vs[1]), text: texts[1] }, restore: vs[0] })
       else onPick({ a: { label: label(vs[0]), text: texts[0] }, b: { label: 'Editor now', text: current() }, restore: vs[0] })
     } catch (er) {
@@ -72,7 +74,7 @@ export function HistoryDrawer({ server, path, backend, rev, current, live, noHis
   const pinIt = async (pinned: boolean) => {
     if (!one) return
     try {
-      await backend.history.pin(server.id, one.id, pinned, noteText)
+      await backend.history.pin(target, one.id, pinned, noteText)
       await load()
     } catch (e) {
       setErr(e instanceof Error ? e.message : String(e))

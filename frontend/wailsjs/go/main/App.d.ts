@@ -30,6 +30,8 @@ export function ConfirmManualVPN(arg1:string):Promise<void>;
 
 export function Connect(arg1:string):Promise<main.ConnectResult>;
 
+export function Containers(arg1:string):Promise<Array<string>>;
+
 export function CopyLogin(arg1:string,arg2:string,arg3:string):Promise<void>;
 
 export function CopySSHCommand(arg1:string):Promise<void>;

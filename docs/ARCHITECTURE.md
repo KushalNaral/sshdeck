@@ -39,6 +39,7 @@ process is in Go. The UI asks, Go acts, and Go pushes progress back as events.
 |---|---|---|
 | `main`, `app.go` | Window setup (CSP-friendly options, single instance), the `App` struct, lifecycle (startup, shutdown, confirm-on-close), CRUD pass-through to the store | `App` |
 | `conn.go` | Connect flow, shells and tabs on one shared SSH connection, container shells, analysis entry point | `Connect`, `AttachShell`, `OpenContainerShell`, `Analyze` |
+| `fsys.go` | The file operations as an interface with three backends: the server (SFTP), a container through the host's `/proc`, and a container through `docker exec` | `fsys`, `sftpFS`, `procFS`, `dockerFS` |
 | `files.go`, `transfers.go` | Remote files over SFTP (list, read, save, rename, delete) and the upload/download queue | `ListDir`, `ReadText`, `WriteText`, `Upload`, `Download`, `Transfer` |
 | `history.go` | When a file version is recorded, who made it, the copy on the server, and the bindings the UI uses | `FileHistory`, `RestoreVersion`, `ServerHistory`, `SetHistoryCopy` |
 | `lock.go`, `settings.go` | Passphrase lock, idle timeout, lock settings, audit view bindings | `Lock`, `Unlock`, `EnableLock`, `DisableLock`, `ListAudit` |
@@ -181,6 +182,31 @@ connection and fail with "not connected" otherwise.
 The editor is Monaco, loaded the first time a file is opened. Each open file keeps its own editor, hidden while
 another tab is in front, so edits and undo history survive switching tabs. Languages are bundled (highlighting,
 plus Monaco's own JSON, TypeScript, CSS and HTML services). There are no language servers; that is not built.
+
+### Files inside containers
+
+Every file call takes a **target**: a server id for the server itself, or `serverID@container` for a running
+container (`splitTarget` in `fsys.go`). `App.fs` turns it into an `fsys`, and the editor, history and transfers
+work on that and nothing else. A container is reached one of two ways, chosen when it is first used and remembered
+for 30 seconds:
+
+- **`/proc` on the host** (`procFS`). `docker inspect` gives the container's pid, and its filesystem is
+  `/proc/<pid>/root` as seen from the host, so the ordinary SFTP session is simply rooted there. Paths are
+  resolved lexically (so `..` stays inside the container). This needs a login that may read that path, in practice
+  root.
+- **`docker exec`** (`dockerFS`), when `/proc` is closed to the login: listing is `find … -exec stat`, reading is
+  `cat`, writing is `cat >` fed through the SSH session (`Client.Exec`, which takes stdin and stdout), plus
+  `mv`, `rm`, `mkdir`, `chmod`. File names are only ever passed as `$1` and `$2` to a fixed script, and quoted
+  for the host shell, so a name cannot become shell syntax. `sudo -n` is tried when docker needs it. It works on
+  busybox and GNU userlands, but only as well as the container has `sh`, `find`, `stat` and `cat`.
+
+Both container backends **write in place** (`InPlace`): the file keeps its owner, mode and inode, which a
+temp-file-and-rename save would not (it would become owned by whoever runs the copy, usually root). In-place is
+not atomic, so a dropped connection mid-save can leave a short file; the previous text is in history.
+
+History keeps container files apart from the server's own: a version's path is `docker:NAME:/path`, so
+`/etc/app.env` in a container and on the host do not mix. The copy on the server (`~/.sshdeck/history`) is always
+written on the host's side, as for other files.
 
 ### File history
 
@@ -444,6 +470,9 @@ memory while in use.
 - History is per file path, so a renamed file starts a new history, and two people saving at the same moment are
   not merged (the second save is refused and offers overwrite or reload). The server copy is only as private as
   the login's home folder.
+- Containers: only running ones, no symlink following, and a container that restarts mid-session needs the
+  panel refreshed (it re-resolves after 30 seconds). Files owned by another user inside a container may be
+  read-only to the login.
 - Files: no resume for interrupted transfers, no permission editing, no symlink creation, and files over 2 MB
   cannot be edited in the app. The editor has no language servers.
 - Organisation mode (central inventory, OIDC, per-user access) is designed in [ORG-MODE.md](ORG-MODE.md), not built.

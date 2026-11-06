@@ -33,3 +33,12 @@ export function validName(n: string): string | null {
   if (n === '.' || n === '..') return 'That name is reserved.'
   return null
 }
+
+/** The file history names container files "docker:NAME:/path"; this splits that back into its parts. */
+export function splitHist(p: string): { container: string; path: string } {
+  const m = /^docker:([A-Za-z0-9][A-Za-z0-9_.-]*):(\/.*)$/.exec(p)
+  return m ? { container: m[1], path: m[2] } : { container: '', path: p }
+}
+
+/** A target names where files are: a server id, or "serverId@container". */
+export const targetOf = (serverId: string, container: string) => (container ? `${serverId}@${container}` : serverId)

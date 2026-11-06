@@ -56,6 +56,9 @@ function run(name: string, up: boolean, total: number, fail = false) {
 
 const started = (n: number): StartResult => ({ started: n })
 export const mockFiles: FilesApi = {
+  async containers() {
+    return ['app', 'queue-worker', 'redis']
+  },
   async list(_s, dir) {
     await sleep(120)
     const d = dir || '/home/deploy'
