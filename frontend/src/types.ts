@@ -22,6 +22,23 @@ export interface Vpn {
 // One cell of the fixed-cell state mark: filled holds, hollow does not, struck is a problem, confirmed is live.
 export type Mark = 'filled' | 'hollow' | 'struck' | 'confirmed'
 
+/** A saved port forward. "local" listens here and reaches target from the server; "remote" listens on the server and reaches target from here. */
+export interface Tunnel {
+  id: string
+  name: string
+  kind: 'local' | 'remote'
+  listen: string
+  target: string
+  auto?: boolean
+}
+
+export interface TunnelState {
+  id: string
+  state: 'running' | 'stopped'
+  error?: string
+  conns: number
+}
+
 export interface Server {
   id: string
   name: string
@@ -43,6 +60,9 @@ export interface Server {
   os: string
   software: Software[]
   logins?: Login[]
+  tunnels?: Tunnel[]
+  /** Reach this server by way of another one (ProxyJump). */
+  jumpId?: string
   projects: string[]
   mark: Exclude<Mark, 'confirmed'>
   note?: string

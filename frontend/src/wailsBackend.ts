@@ -1,7 +1,7 @@
 import * as App from '../wailsjs/go/main/App'
 import { EventsOn } from '../wailsjs/runtime/runtime'
-import { ConnectError, type Backend, type FilesApi, type HistoryApi } from './api'
-import type { Analysis, HistorySettings, Link, Listing, Step, Transfer, Version } from './types'
+import { ConnectError, type Backend, type FilesApi, type HistoryApi, type TunnelsApi } from './api'
+import type { Analysis, HistorySettings, Link, Listing, Step, Transfer, TunnelState, Version } from './types'
 
 const fromBase64 = (b64: string) => Uint8Array.from(atob(b64), (c) => c.charCodeAt(0))
 
@@ -39,6 +39,13 @@ const files: FilesApi = {
   onDrop: (cb) => EventsOn('files:dropped', cb),
 }
 
+const tunnels: TunnelsApi = {
+  list: async (s) => ((await App.Tunnels(s)) ?? []) as TunnelState[],
+  start: (s, id) => go(App.StartTunnel(s, id)),
+  stop: (s, id) => go(App.StopTunnel(s, id)),
+  onChange: (s, cb) => EventsOn('tunnels:' + s, (t: TunnelState[]) => cb(t ?? [])),
+}
+
 const history: HistoryApi = {
   file: async (s, p) => ((await go(App.FileHistory(s, p))) ?? []) as Version[],
   server: async (s, n) => ((await go(App.ServerHistory(s, n))) ?? []) as Version[],
@@ -56,6 +63,7 @@ const history: HistoryApi = {
 
 export const wailsBackend: Backend = {
   files,
+  tunnels,
   history,
   async connect(server, _vpn, onSteps) {
     const off = EventsOn(`connect:${server.id}`, (steps: Step[]) => onSteps(steps))

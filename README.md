@@ -14,6 +14,7 @@ one is needed, logs in over SSH and opens a terminal. It also reads each server 
 - Files tab: browse a server over SFTP, upload and download with drag and drop, and edit files in an editor tab
 - Files and the editor work inside running Docker containers too
 - File history: every save keeps the old text, with who changed it and when, so you can compare and restore
+- Saved SSH tunnels (port forwards) and jump hosts (`ssh -J`), and a warning before a second VPN is connected
 - Panels you can resize, hide and dock
 - Read-only scan of each server: OS, memory, disks, failed services, containers and software versions
 - Servers ranked 1 to 5 by failed services, full disks, outdated software and overdue tasks, with the reasons shown
@@ -57,7 +58,14 @@ Ctrl+K finds a server, Ctrl+T opens a shell tab, Ctrl+1/2/3 switch between Firef
 Ctrl+Shift+F searches the terminal.
 
 To bring in many servers at once, use Admin, Import. "Save a blank template" gives you the CSV columns; each row is
-shown as new, update or error before anything is saved, and a blank password keeps the stored one.
+shown as new, update or error before anything is saved, and a blank password keeps the stored one. "Read an SSH
+config" does the same for the hosts in `~/.ssh/config`, including `ProxyJump`; those servers log in with the key or
+the ssh-agent.
+
+A server can have tunnels (Admin, Servers) and a "Jump through" server. Once connected, the Analysis tab lists the
+tunnels with a Start/Stop button. Local ones listen on this machine, so `127.0.0.1:5433` can reach a database that only
+the server sees. If you connect a server on a different VPN while one is up, sshdeck asks whether to switch, because
+two VPNs at once often break each other's routes.
 
 The Files tab next to Analysis lists the server's folders. Upload with the button or by dragging files in, and
 download the selection. Double-click a file to edit it in a tab (Ctrl+S saves). If the file changed on the server

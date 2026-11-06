@@ -94,6 +94,8 @@ export function PickDownload(arg1:string,arg2:Array<string>):Promise<main.Upload
 
 export function PickImport():Promise<main.ImportPreview>;
 
+export function PickSSHConfig():Promise<main.ImportPreview>;
+
 export function PickUpload(arg1:string,arg2:string,arg3:boolean):Promise<main.UploadResult>;
 
 export function PinVersion(arg1:string,arg2:string,arg3:boolean,arg4:string):Promise<void>;
@@ -132,6 +134,10 @@ export function SetHistorySettings(arg1:main.HistorySettings):Promise<void>;
 
 export function SetLockSettings(arg1:number,arg2:boolean):Promise<void>;
 
+export function StartTunnel(arg1:string,arg2:string):Promise<void>;
+
+export function StopTunnel(arg1:string,arg2:string):Promise<void>;
+
 export function TermResize(arg1:string,arg2:number,arg3:number,arg4:number):Promise<void>;
 
 export function TermWrite(arg1:string,arg2:number,arg3:string):Promise<void>;
@@ -139,6 +145,8 @@ export function TermWrite(arg1:string,arg2:number,arg3:string):Promise<void>;
 export function Touch():Promise<void>;
 
 export function Transfers():Promise<Array<main.Transfer>>;
+
+export function Tunnels(arg1:string):Promise<Array<main.TunnelState>>;
 
 export function Unlock(arg1:string):Promise<void>;
 

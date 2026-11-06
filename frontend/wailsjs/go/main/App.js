@@ -174,6 +174,10 @@ export function PickImport() {
   return window['go']['main']['App']['PickImport']();
 }
 
+export function PickSSHConfig() {
+  return window['go']['main']['App']['PickSSHConfig']();
+}
+
 export function PickUpload(arg1, arg2, arg3) {
   return window['go']['main']['App']['PickUpload'](arg1, arg2, arg3);
 }
@@ -250,6 +254,14 @@ export function SetLockSettings(arg1, arg2) {
   return window['go']['main']['App']['SetLockSettings'](arg1, arg2);
 }
 
+export function StartTunnel(arg1, arg2) {
+  return window['go']['main']['App']['StartTunnel'](arg1, arg2);
+}
+
+export function StopTunnel(arg1, arg2) {
+  return window['go']['main']['App']['StopTunnel'](arg1, arg2);
+}
+
 export function TermResize(arg1, arg2, arg3, arg4) {
   return window['go']['main']['App']['TermResize'](arg1, arg2, arg3, arg4);
 }
@@ -264,6 +276,10 @@ export function Touch() {
 
 export function Transfers() {
   return window['go']['main']['App']['Transfers']();
+}
+
+export function Tunnels(arg1) {
+  return window['go']['main']['App']['Tunnels'](arg1);
 }
 
 export function Unlock(arg1) {

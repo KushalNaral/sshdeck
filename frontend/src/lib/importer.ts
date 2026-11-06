@@ -24,6 +24,8 @@ export interface ImportResult {
 export interface ImportApi {
   /** Opens the file dialog. Null when the user cancels. */
   pick(): Promise<ImportPreview | null>
+  /** Hosts from an OpenSSH config file; no passwords, so logins use the key or the ssh-agent. */
+  pickSSHConfig(): Promise<ImportPreview | null>
   apply(token: string, rows: number[]): Promise<ImportResult>
   /** Each returns the saved path, or '' when the user cancels. */
   saveTemplate(): Promise<string>
@@ -33,6 +35,10 @@ export interface ImportApi {
 const wailsImport: ImportApi = {
   async pick() {
     const p = (await App.PickImport()) as unknown as ImportPreview
+    return p?.token ? p : null
+  },
+  async pickSSHConfig() {
+    const p = (await App.PickSSHConfig()) as unknown as ImportPreview
     return p?.token ? p : null
   },
   apply: async (token, rows) => {
@@ -55,6 +61,16 @@ const mockImport: ImportApi = {
         { index: 2, line: 4, type: 'server', name: 'Atlas Server', action: 'update', hasPassword: false },
         { index: 3, line: 5, type: 'login', name: 'Main database', action: 'new', hasPassword: true },
         { index: 4, line: 6, type: 'server', name: '', action: 'error', hasPassword: false, error: 'name is required' },
+      ],
+    }
+  },
+  async pickSSHConfig() {
+    return {
+      token: 'demo',
+      file: 'config',
+      rows: [
+        { index: 0, line: 1, type: 'server', name: 'bastion', action: 'new', hasPassword: false },
+        { index: 1, line: 5, type: 'server', name: 'inner-db', action: 'new', hasPassword: false },
       ],
     }
   },

@@ -133,21 +133,29 @@ func authMethod(srv store.Server, secret string) (ssh.AuthMethod, func(), error)
 }
 
 func dial(ctx context.Context, srv store.Server, secret string) (*ssh.Client, error) {
+	addr := net.JoinHostPort(srv.Host, strconv.Itoa(srv.Port))
+	nc, err := (&net.Dialer{Timeout: 15 * time.Second}).DialContext(ctx, "tcp", addr)
+	if err != nil {
+		return nil, fmt.Errorf("cannot reach %s: %w", addr, err)
+	}
+	return handshake(ctx, nc, srv, secret)
+}
+
+// handshake logs in over a connection that is already open, directly or through a jump host.
+func handshake(ctx context.Context, nc net.Conn, srv store.Server, secret string) (*ssh.Client, error) {
+	addr := net.JoinHostPort(srv.Host, strconv.Itoa(srv.Port))
 	method, closeAuth, err := authMethod(srv, secret)
 	if err != nil {
+		nc.Close()
 		return nil, err
 	}
 	defer closeAuth() // signing happens during the handshake, so an agent connection is only needed until then
 	hk, err := hostKeyCallback()
 	if err != nil {
+		nc.Close()
 		return nil, err
 	}
 	cfg := &ssh.ClientConfig{User: srv.User, Auth: []ssh.AuthMethod{method}, HostKeyCallback: hk, Timeout: 15 * time.Second}
-	addr := net.JoinHostPort(srv.Host, strconv.Itoa(srv.Port))
-	nc, err := (&net.Dialer{Timeout: cfg.Timeout}).DialContext(ctx, "tcp", addr)
-	if err != nil {
-		return nil, fmt.Errorf("cannot reach %s: %w", addr, err)
-	}
 	// Bound the handshake by ctx too: closing the conn unblocks NewClientConn.
 	stop := context.AfterFunc(ctx, func() { nc.Close() })
 	defer stop()
@@ -180,6 +188,10 @@ type Client interface {
 	// Exec runs a command with the given input and output (either may be nil). A failure carries the command's
 	// error output. Cancelling ctx ends only this command.
 	Exec(ctx context.Context, cmd string, stdin io.Reader, stdout io.Writer) error
+	// Dial opens a connection to addr from the server's side of the link (a local port forward).
+	Dial(network, addr string) (net.Conn, error)
+	// Listen listens on the server and hands back what connects to it (a remote port forward).
+	Listen(network, addr string) (net.Listener, error)
 	// SFTP returns the connection's file-transfer client, opened on first use and shared by every caller.
 	SFTP() (*sftp.Client, error)
 	// Done is closed when the connection has ended, whether by Close, a keepalive failure or the server.
@@ -202,11 +214,33 @@ func Dial(ctx context.Context, srv store.Server, secret string) (Client, error) 
 	if err != nil {
 		return nil, err
 	}
+	return newClient(c), nil
+}
+
+func newClient(c *ssh.Client) *client {
 	k := &client{c: c, done: make(chan struct{})}
 	go keepAlive(c, 15*time.Second, 10*time.Second, k.done, func() { k.Close() })
 	go func() { c.Wait(); k.Close() }() // the server or the network ended the connection
-	return k, nil
+	return k
 }
+
+// DialThrough connects and logs in to srv by way of an existing connection to a jump host. Closing the returned
+// client does not close via.
+func DialThrough(ctx context.Context, via Client, srv store.Server, secret string) (Client, error) {
+	addr := net.JoinHostPort(srv.Host, strconv.Itoa(srv.Port))
+	nc, err := via.Dial("tcp", addr)
+	if err != nil {
+		return nil, fmt.Errorf("cannot reach %s from the jump host: %w", addr, err)
+	}
+	c, err := handshake(ctx, nc, srv, secret)
+	if err != nil {
+		return nil, err
+	}
+	return newClient(c), nil
+}
+
+func (k *client) Dial(network, addr string) (net.Conn, error)       { return k.c.Dial(network, addr) }
+func (k *client) Listen(network, addr string) (net.Listener, error) { return k.c.Listen(network, addr) }
 
 func (k *client) SFTP() (*sftp.Client, error) {
 	k.fmu.Lock()

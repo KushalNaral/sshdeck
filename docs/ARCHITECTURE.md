@@ -52,7 +52,8 @@ process is in Go. The UI asks, Go acts, and Go pushes progress back as events.
 | `internal/vpn` | Start and stop VPN client processes and watch their output | `Manager`, `Starter`, `Proc`, `CertError` |
 | `internal/probe` | Run read-only commands and parse them into a report | `Analyze`, `Report`, `Run` |
 | `internal/history` | Versions of edited files: sealed storage, pruning, and the shared copy on the server | `Store`, `Version`, `WriteRemote`, `ListRemote` |
-| `internal/importer` | Read the master `.ods` project list | `ReadODS`, `Projects`, `Sheet.Pairs` |
+| `tunnels.go`, `jump.go` | Saved port forwards on a connected server; logging in through jump hosts and picking the VPN for a chain | `StartTunnel`, `dialServer`, `vpnFor` |
+| `internal/importer` | Parse the CSV, an OpenSSH config, and the master `.ods` project list | `ParseCSV`, `ParseSSHConfig`, `ReadODS` |
 | `frontend/src` | The UI (see section 8) | `Backend` interface |
 
 Dependencies point one way: `main` → `store`, `sshx`, `vpn`, `probe`. `probe` takes a plain
@@ -249,6 +250,29 @@ which side the panel docks to, whether each is open, file column widths). `Split
 separator; the values are clamped and kept in `localStorage`, and "Reset layout" restores the defaults. This
 is only per-user presentation, so it is not part of the vault or the settings file.
 
+### Tunnels
+
+A server can carry saved port forwards (`store.Tunnel`: name, `local` or `remote`, listen address, target, auto-start).
+`StartTunnel` needs a live connection. A local forward listens on this machine and, for each accepted connection,
+dials the target through the SSH client; a remote forward asks the server to listen and dials the target from here.
+The client is looked up for every connection, so a redialled link needs no rebinding, and a remote forward listens
+again on the new client once the old listener dies. A busy port is reported when the tunnel starts. Tunnels stop with
+`Disconnect`; ones marked auto start after the connect succeeds. State goes to the UI as `tunnels:<serverId>` events.
+
+### Jump hosts
+
+`Server.JumpID` names another server to go through, as `ssh -J` does. `dialServer` logs in to the jump host first (itself
+possibly jumped) and then calls `sshx.DialThrough`, which opens a direct-tcpip channel on that connection and runs the
+normal handshake over it. Closing the target closes its hops. The store refuses a loop, an unknown jump host and chains
+longer than three, and refuses to delete a server that others jump through. The VPN comes from the server itself,
+otherwise from the nearest jump host that has one, and the route check probes the host that is actually dialled.
+
+### Two VPNs at once
+
+Two VPN clients usually fight over routes and DNS. Before connecting, the UI looks for another VPN that has a live or
+connecting session (`vpnsInTheWay`, following jump hosts) and asks: switch (disconnect those servers, then connect),
+connect both, or cancel. It is advice only: `Connect` itself never refuses.
+
 ## 6. VPN
 
 `vpn.Manager` runs one client per profile and decides "up" by reading the client's output:
@@ -401,13 +425,13 @@ due dates), **Admin** (servers, VPN profiles, System, Security, Audit).
 
 | Area | How |
 |---|---|
-| `sshx` | An in-process `x/crypto/ssh` server: exec output and exit status, wrong password, key and agent login, host-key change, shell echo, resize, close, one shared connection for many shells, keepalive |
+| `sshx` | An in-process `x/crypto/ssh` server (it also forwards ports, for jump host tests): exec output and exit status, wrong password, key and agent login, host-key change, shell echo, resize, close, one shared connection for many shells, keepalive |
 | `vault`, `audit` | Round trips, wrong passphrase, tampering, throttling; hash chain edits, rotation |
 | `vpn` | A fake `Starter` and fake processes; one test runs real `sh` processes for `ExecStarter` |
 | `probe` | Golden command outputs for Ubuntu 22.04 with Docker and CentOS 7 without |
 | `store` | Temp directory plus an in-memory `Secrets` |
 | `App` | Fakes for `dial`, `lookPath`, the VPN manager, audit and events; covers steps, Hillstone, shared VPN, cancel, lock and idle, audit, shutdown, container commands, dependencies |
-| `importer` | Parsing helpers |
+| `importer` | Parsing helpers; SSH config with wildcards, `Host *` defaults, quotes, ProxyJump |
 | Frontend | `vitest` for pure logic (`lib/version.ts`); the UI is checked by eye in the browser |
 
 Run everything with `go test -race -tags webkit2_41 ./...`.
@@ -475,4 +499,5 @@ memory while in use.
   read-only to the login.
 - Files: no resume for interrupted transfers, no permission editing, no symlink creation, and files over 2 MB
   cannot be edited in the app. The editor has no language servers.
+- Tunnels: no dynamic (SOCKS) forwards. SSH config import skips `Include` and `Match`, and takes only the first `IdentityFile` and the first `ProxyJump` hop.
 - Organisation mode (central inventory, OIDC, per-user access) is designed in [ORG-MODE.md](ORG-MODE.md), not built.

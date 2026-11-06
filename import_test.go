@@ -151,3 +151,47 @@ func TestExportWritesNoPasswordsAndMode0600(t *testing.T) {
 		t.Errorf("mode %v", st.Mode().Perm())
 	}
 }
+
+const sshConfigSample = `Host bastion
+  HostName 203.0.113.9
+  User ops
+
+Host inner
+  HostName 10.1.1.1
+  User deploy
+  ProxyJump bastion
+  IdentityFile ~/.ssh/id_inner
+`
+
+func TestImportSSHConfigSetsJumpHosts(t *testing.T) {
+	a, _, _ := rig(t, okOpen(newShell()))
+	pv, err := a.importSSHConfig(writeCSV(t, sshConfigSample))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(pv.Rows) != 2 || pv.Rows[0].Action != "new" || pv.Rows[1].Action != "new" {
+		t.Fatalf("%+v", pv.Rows)
+	}
+	res, err := a.ApplyImport(pv.Token, []int{0, 1})
+	if err != nil || res.Added != 2 || len(res.Failures) != 0 {
+		t.Fatalf("%+v %v", res, err)
+	}
+	inner, _ := a.serverByName("inner")
+	bastion, _ := a.serverByName("bastion")
+	if inner.JumpID != bastion.ID || inner.Auth != "key" || !strings.HasSuffix(inner.KeyPath, "/.ssh/id_inner") {
+		t.Fatalf("%+v", inner)
+	}
+	again, _ := a.importSSHConfig(writeCSV(t, sshConfigSample))
+	if again.Rows[0].Action != "update" {
+		t.Errorf("a second import should update: %+v", again.Rows)
+	}
+}
+
+func TestImportSSHConfigJumpHostMustBeImportedToo(t *testing.T) {
+	a, _, _ := rig(t, okOpen(newShell()))
+	pv, _ := a.importSSHConfig(writeCSV(t, sshConfigSample))
+	res, _ := a.ApplyImport(pv.Token, []int{1}) // only "inner": its jump host "bastion" is not saved
+	if len(res.Failures) != 1 || !strings.Contains(res.Failures[0], "bastion") {
+		t.Fatalf("%+v", res)
+	}
+}

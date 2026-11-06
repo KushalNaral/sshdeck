@@ -335,6 +335,24 @@ export namespace main {
 	        this.error = source["error"];
 	    }
 	}
+	export class TunnelState {
+	    id: string;
+	    state: string;
+	    error?: string;
+	    conns: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new TunnelState(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.state = source["state"];
+	        this.error = source["error"];
+	        this.conns = source["conns"];
+	    }
+	}
 	export class UpdateStatus {
 	    version: string;
 	    autoCheck: boolean;
@@ -495,6 +513,28 @@ export namespace store {
 	        this.note = source["note"];
 	    }
 	}
+	export class Tunnel {
+	    id: string;
+	    name: string;
+	    kind: string;
+	    listen: string;
+	    target: string;
+	    auto?: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new Tunnel(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.name = source["name"];
+	        this.kind = source["kind"];
+	        this.listen = source["listen"];
+	        this.target = source["target"];
+	        this.auto = source["auto"];
+	    }
+	}
 	export class Software {
 	    name: string;
 	    version?: string;
@@ -529,6 +569,8 @@ export namespace store {
 	    projects?: string[];
 	    note?: string;
 	    historyCopy?: string;
+	    tunnels?: Tunnel[];
+	    jumpId?: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new Server(source);
@@ -553,6 +595,8 @@ export namespace store {
 	        this.projects = source["projects"];
 	        this.note = source["note"];
 	        this.historyCopy = source["historyCopy"];
+	        this.tunnels = this.convertValues(source["tunnels"], Tunnel);
+	        this.jumpId = source["jumpId"];
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
@@ -602,6 +646,7 @@ export namespace store {
 	        this.updated = source["updated"];
 	    }
 	}
+	
 	export class VPN {
 	    id: string;
 	    name: string;

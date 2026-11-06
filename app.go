@@ -46,13 +46,16 @@ type App struct {
 	hs      *history.Store
 
 	// File transfers (files.go).
-	xmu      sync.Mutex
-	xfers    []*xfer
-	cfs      map[string]cfsEntry // how each container's files are reached (files.go)
-	xseq     int
-	xsem     chan struct{}
-	dial     func(ctx context.Context, srv store.Server, secret string) (sshx.Client, error)
-	lookPath func(file string) (string, error)
+	xmu         sync.Mutex
+	xfers       []*xfer
+	tmu         sync.Mutex            // guards tuns
+	tuns        map[string]*tunnelRun // running tunnels, by serverID/tunnelID
+	cfs         map[string]cfsEntry   // how each container's files are reached (files.go)
+	xseq        int
+	xsem        chan struct{}
+	dialThrough func(ctx context.Context, via sshx.Client, sv store.Server, pw string) (sshx.Client, error) // login by way of a jump host
+	dial        func(ctx context.Context, srv store.Server, secret string) (sshx.Client, error)
+	lookPath    func(file string) (string, error)
 
 	// The clipboard, and how long a copied password stays on it.
 	clipSet func(string) error
@@ -128,7 +131,7 @@ func newApp(st *store.Store, m vpn.Manager, dial func(context.Context, store.Ser
 		emit: func(string, ...any) {}, xsem: make(chan struct{}, 3), audit: func(string, string, string) {},
 		clipSet: func(string) error { return nil }, clipGet: func() (string, error) { return "", nil }, clipTTL: clipboardTTL,
 		secrets: store.Keyring{}, clock: time.Now, vpnPoll: 5 * time.Second, backoff: []time.Duration{2 * time.Second, 4 * time.Second, 8 * time.Second, 16 * time.Second, 30 * time.Second}, settings: defaultSettings(), lastActive: time.Now(),
-		conns: map[string]*conn{}, cancels: map[string]func(){}, manual: map[string]chan struct{}{}, version: version,
+		conns: map[string]*conn{}, tuns: map[string]*tunnelRun{}, cancels: map[string]func(){}, manual: map[string]chan struct{}{}, version: version, dialThrough: sshx.DialThrough,
 		probe: probeTCP, routeWait: 30 * time.Second, routePoll: 700 * time.Millisecond,
 	}
 	a.updCheck = func(ctx context.Context) (update.Info, error) { return a.updater().Check(ctx) }

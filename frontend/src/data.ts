@@ -32,7 +32,17 @@ const s = (
   note,
 })
 
-export const SERVERS: Server[] = [
+const tunnels = (list: Server[]) =>
+  list.map((x) =>
+    x.id === 'atlas'
+      ? { ...x, tunnels: [
+          { id: 't1', name: 'Database', kind: 'local' as const, listen: '127.0.0.1:5433', target: 'db.internal:5432', auto: true },
+          { id: 't2', name: 'Admin panel', kind: 'local' as const, listen: '127.0.0.1:8081', target: 'localhost:8080' },
+        ] }
+      : x,
+  )
+
+export const SERVERS: Server[] = tunnels([
   s('atlas', 'Atlas Server', null, 'CentOS 7', '7.4.27', '8.2.35', 'Apache 2.4', ['Community Portal', 'Member Directory', 'Co-op Ledger'], 'filled'),
   s('birch', 'Birch Production', null, 'Ubuntu 22.04.4', '8.2.25', '8.2.35', 'Nginx 1.18', ['Savings Portal', 'Trade Desk', 'Alumni Site', 'Events Site'], 'filled'),
   s('cedar', 'Cedar Server', null, 'Ubuntu 22.04.5', '8.3.19', '8.3.36', 'Nginx 1.18', ['Retail Dashboard'], 'filled'),
@@ -49,7 +59,7 @@ export const SERVERS: Server[] = [
   s('ruby', 'Ruby Portal', 'gp-partner', 'CentOS 7', '7.2.34', '8.2.35', 'Apache 2.4', ['Partner Portal'], 'hollow', 'Not patchable: CodeIgniter 2'),
   s('sable', 'Sable Server', 'hill-branch', 'Ubuntu 20.04.6', '8.2.8', '8.2.35', 'Apache 2.4', ['Branch Tools'], 'hollow'),
   s('tundra', 'Tundra Server', 'req', 'Ubuntu 22.04.4', '8.2.27', '8.2.35', 'Nginx 1.18', ['Audit Archive'], 'hollow', 'VPN required, type not recorded'),
-]
+])
 
 // Demo VPN profiles: gateways use documentation-range addresses; real ones come from the importer.
 export const VPNS: Vpn[] = [

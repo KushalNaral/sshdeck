@@ -46,7 +46,9 @@ type Server struct {
 	Note        string     `json:"note,omitempty"`
 	// HistoryCopy says whether edited files' history is also kept on the server: "on", "off", or empty for the
 	// default (on, except on production servers). Changed only through SetHistoryCopy.
-	HistoryCopy string `json:"historyCopy,omitempty"`
+	HistoryCopy string   `json:"historyCopy,omitempty"`
+	Tunnels     []Tunnel `json:"tunnels,omitempty"` // saved port forwards
+	JumpID      string   `json:"jumpId,omitempty"`  // reach this server through another one (ProxyJump)
 }
 
 // Login is another credential that belongs to a server, such as its database or cPanel. The secret is kept like a
@@ -115,6 +117,9 @@ func CheckServer(sv Server) error {
 		return invalid("port must be 1-65535")
 	case sv.Auth != "password" && sv.Auth != "key":
 		return invalid("auth must be password or key")
+	}
+	if err := checkTunnels(sv.Tunnels); err != nil {
+		return err
 	}
 	return checkSoftware(sv.Software)
 }
@@ -391,6 +396,10 @@ func (s *Store) SaveServer(sv Server, password string) (Server, error) {
 	if sv.ID == "" {
 		sv.ID = newID(sv.Name)
 	}
+	sv.Tunnels = cleanTunnels(sv.Tunnels)
+	if err := s.checkJump(sv); err != nil {
+		return sv, err
+	}
 	if password != "" {
 		if err := s.setSecret("server/"+sv.ID, password); err != nil {
 			return sv, fmt.Errorf("store password: %w", err)
@@ -478,6 +487,15 @@ func (s *Store) DeleteServer(id string) error {
 	i := s.serverIndex(id)
 	if i < 0 {
 		return ErrNotFound
+	}
+	var users []string
+	for _, o := range s.d.Servers {
+		if o.JumpID == id {
+			users = append(users, o.Name)
+		}
+	}
+	if len(users) > 0 {
+		return invalid("%s is the jump host for %s. Change those servers first.", s.d.Servers[i].Name, strings.Join(users, ", "))
 	}
 	logins := s.d.Servers[i].Logins
 	s.d.Servers = append(s.d.Servers[:i], s.d.Servers[i+1:]...)

@@ -70,8 +70,8 @@ func (a *App) Connect(serverID string) ConnectResult {
 		return r
 	}
 	name, via := a.serverName(serverID), "direct"
-	if sv, ok := a.server(serverID); ok && sv.VPNID != "" {
-		via = "via " + a.vpnName(sv.VPNID)
+	if sv, ok := a.server(serverID); ok && a.vpnFor(sv) != "" {
+		via = "via " + a.vpnName(a.vpnFor(sv))
 	}
 	switch {
 	case r.OK:
@@ -116,7 +116,7 @@ func (a *App) connect(serverID string) ConnectResult {
 
 	var vp *store.VPN
 	for _, v := range a.st.VPNs() {
-		if v.ID == sv.VPNID && sv.VPNID != "" {
+		if want := a.vpnFor(sv); v.ID == want && want != "" {
 			v := v
 			vp = &v
 		}
@@ -130,7 +130,7 @@ func (a *App) connect(serverID string) ConnectResult {
 		steps = append(steps, Step{Key: "vpn", Label: "VPN", Status: "wait", Detail: d})
 	}
 	steps = append(steps,
-		Step{Key: "ssh", Label: "SSH", Status: "wait", Detail: fmt.Sprintf("%s@%s:%d", sv.User, sv.Host, sv.Port)},
+		Step{Key: "ssh", Label: "SSH", Status: "wait", Detail: a.sshDetail(sv)},
 		Step{Key: "shell", Label: "Shell", Status: "wait"})
 	set := func(key string, patch func(*Step)) {
 		for i := range steps {
@@ -178,7 +178,7 @@ func (a *App) connect(serverID string) ConnectResult {
 		set("ssh", func(s *Step) { s.Status = "fail" })
 		return fail("No password is stored for "+sv.Name+".", "Open Admin, edit the server and enter its password.")
 	}
-	client, err := a.dial(ctx, sv, pw)
+	client, err := a.dialServer(ctx, sv, pw)
 	var sess sshx.Session
 	if err == nil {
 		if sess, err = client.Shell(ctx); err != nil {
@@ -213,6 +213,7 @@ func (a *App) connect(serverID string) ConnectResult {
 	a.conns[serverID] = c
 	a.mu.Unlock()
 	go a.watch(wctx, serverID, c, vp)
+	go a.startAutoTunnels(serverID)
 	return ConnectResult{OK: true}
 }
 
@@ -304,11 +305,12 @@ func (a *App) waitRoute(ctx context.Context, sv store.Server, set func(string, f
 	waiting := false
 	for {
 		pctx, cancel := context.WithTimeout(ctx, 3*time.Second)
-		err := a.probe(pctx, sv.Host, sv.Port)
+		en := a.entry(sv) // behind a jump host, the route that matters is the one to the jump host
+		err := a.probe(pctx, en.Host, en.Port)
 		cancel()
 		if err == nil {
 			if waiting {
-				set("ssh", func(s *Step) { s.Detail = fmt.Sprintf("%s@%s:%d", sv.User, sv.Host, sv.Port) })
+				set("ssh", func(s *Step) { s.Detail = a.sshDetail(sv) })
 			}
 			return nil
 		}
@@ -318,7 +320,7 @@ func (a *App) waitRoute(ctx context.Context, sv store.Server, set func(string, f
 		if !waiting {
 			waiting = true
 			set("ssh", func(s *Step) {
-				s.Detail = fmt.Sprintf("%s@%s:%d · waiting for the VPN route", sv.User, sv.Host, sv.Port)
+				s.Detail = a.sshDetail(sv) + " · waiting for the VPN route"
 			})
 		}
 		if time.Now().After(deadline) {
@@ -399,6 +401,7 @@ func (a *App) Disconnect(serverID string) {
 	if c == nil {
 		return
 	}
+	a.stopTunnels(serverID)
 	if c.stop != nil {
 		c.stop()
 	}
@@ -522,7 +525,7 @@ func (a *App) Analyze(serverID string) (probe.Report, error) {
 	if cl == nil {
 		dctx, dcancel := context.WithTimeout(ctx, 20*time.Second)
 		var err error
-		cl, err = a.dial(dctx, sv, pw)
+		cl, err = a.dialServer(dctx, sv, pw)
 		dcancel()
 		if err != nil {
 			return probe.Report{}, fmt.Errorf("%s is not reachable: %w", sv.Name, err)
@@ -558,7 +561,7 @@ func (a *App) liveClient(ctx context.Context, c *conn, sv store.Server, pw strin
 			return cl, nil
 		}
 	}
-	fresh, err := a.dial(ctx, sv, pw)
+	fresh, err := a.dialServer(ctx, sv, pw)
 	if err != nil {
 		return nil, err
 	}

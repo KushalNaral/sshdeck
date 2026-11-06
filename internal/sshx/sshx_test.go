@@ -5,9 +5,11 @@ import (
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
+	"io"
 	"net"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -125,6 +127,10 @@ func (ts *testServer) serve(nc net.Conn, cfg *ssh.ServerConfig) {
 	defer conn.Close()
 	go ssh.DiscardRequests(reqs)
 	for nch := range chans {
+		if nch.ChannelType() == "direct-tcpip" { // a port forward, which is how a jump host works
+			go forward(nch)
+			continue
+		}
 		if nch.ChannelType() != "session" {
 			nch.Reject(ssh.UnknownChannelType, "no")
 			continue
@@ -132,6 +138,29 @@ func (ts *testServer) serve(nc net.Conn, cfg *ssh.ServerConfig) {
 		ch, creqs, _ := nch.Accept()
 		go ts.session(ch, creqs)
 	}
+}
+
+func forward(nch ssh.NewChannel) {
+	var d struct {
+		Host     string
+		Port     uint32
+		OrigHost string
+		OrigPort uint32
+	}
+	if ssh.Unmarshal(nch.ExtraData(), &d) != nil {
+		nch.Reject(ssh.ConnectionFailed, "bad request")
+		return
+	}
+	far, err := net.Dial("tcp", net.JoinHostPort(d.Host, strconv.Itoa(int(d.Port))))
+	if err != nil {
+		nch.Reject(ssh.ConnectionFailed, err.Error())
+		return
+	}
+	ch, reqs, _ := nch.Accept()
+	go ssh.DiscardRequests(reqs)
+	go func() { io.Copy(far, ch); far.Close() }()
+	io.Copy(ch, far)
+	ch.Close()
 }
 
 func (ts *testServer) session(ch ssh.Channel, reqs <-chan *ssh.Request) {
@@ -314,5 +343,44 @@ func TestFirstContactIsRememberedAndAChangedKeyIsRefused(t *testing.T) {
 	_, err := Run(ctx(t), srv, goodPassword, "echo hi")
 	if err == nil || !strings.Contains(err.Error(), "changed") {
 		t.Fatalf("want a host-key-changed error, got %v", err)
+	}
+}
+
+func TestLoginThroughAJumpHost(t *testing.T) {
+	_, jump := startServer(t)
+	target, tsrv := startServer(t)
+	via, err := Dial(ctx(t), jump, goodPassword)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer via.Close()
+	c, err := DialThrough(ctx(t), via, tsrv, goodPassword)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out, err := c.Run(ctx(t), "echo hi"); err != nil || !strings.Contains(out, "hi") {
+		t.Fatalf("%q %v", out, err)
+	}
+	if target.accepted.Load() != 1 {
+		t.Errorf("the target should have been reached once, got %d", target.accepted.Load())
+	}
+	c.Close()
+	select {
+	case <-via.Done():
+		t.Error("closing the target must not close the jump host")
+	case <-time.After(100 * time.Millisecond):
+	}
+}
+
+func TestJumpHostThatCannotReachTheTargetSaysSo(t *testing.T) {
+	_, jump := startServer(t)
+	via, err := Dial(ctx(t), jump, goodPassword)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer via.Close()
+	_, err = DialThrough(ctx(t), via, store.Server{Host: "127.0.0.1", Port: 1, User: "deploy", Auth: "password"}, goodPassword)
+	if err == nil || !strings.Contains(err.Error(), "jump host") {
+		t.Fatalf("%v", err)
 	}
 }

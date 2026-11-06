@@ -25,9 +25,9 @@ export function ImportPanel({ onImported }: { onImported: () => void }) {
       setBusy(false)
     }
   }
-  const choose = () =>
+  const choose = (pick: () => Promise<ImportPreview | null> = importApi.pick) =>
     run(async () => {
-      const p = await importApi.pick()
+      const p = await pick()
       if (!p) return
       setPv(p)
       setRes(null)
@@ -56,7 +56,8 @@ export function ImportPanel({ onImported }: { onImported: () => void }) {
         Use a spreadsheet saved as CSV. Rows with the same name as something you already have update it; a blank password keeps the stored one. Passwords are read by the app itself and are never shown here.
       </p>
       <div className="actions">
-        <button className="btn solid" onClick={choose} disabled={busy}>Choose a CSV file…</button>
+        <button className="btn solid" onClick={() => choose()} disabled={busy}>Choose a CSV file…</button>
+        <button className="btn" onClick={() => choose(importApi.pickSSHConfig)} disabled={busy} title="Reads Host entries, including ProxyJump. Passwords are not in that file: logins use the key or the ssh-agent.">Read an SSH config…</button>
         <button className="btn" onClick={() => saved('Template', importApi.saveTemplate)} disabled={busy}>Save a blank template…</button>
         <button className="btn" onClick={() => saved('Export', importApi.exportAll)} disabled={busy} title="Everything you have, without passwords">Export all…</button>
       </div>

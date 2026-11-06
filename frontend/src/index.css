@@ -2416,3 +2416,26 @@ progress::-webkit-progress-value {
   outline: 1px solid var(--focus);
   border-color: var(--focus);
 }
+
+.tunnels {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 6px;
+}
+.tunnels li {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+}
+.tunnels .muted {
+  color: var(--ink-2, inherit);
+  opacity: 0.75;
+  font-variant-numeric: tabular-nums;
+}
+.tunnels .addr {
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}

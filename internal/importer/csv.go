@@ -28,6 +28,7 @@ type Row struct {
 	Secret     string // the password cell; never shown in a preview
 	VPNName    string // a server row: the VPN it uses, by name
 	ServerName string // a login row: the server it belongs to, by name
+	JumpName   string // a server row: the server it is reached through, by name
 	Err        string
 }
 

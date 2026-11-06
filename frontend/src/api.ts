@@ -1,4 +1,4 @@
-import type { Analysis, Dep, Link, HistorySettings, Listing, Policy, Server, StartResult, Step, TextFile, Transfer, Version, Vpn } from './types'
+import type { Analysis, Dep, Link, HistorySettings, Listing, Policy, Server, StartResult, Step, TextFile, Transfer, TunnelState, Version, Vpn } from './types'
 import { mockFiles, mockHistory } from './mockFiles'
 
 /** Everything the UI needs from the Go side. The Wails bindings will implement this same shape. */
@@ -45,8 +45,18 @@ export interface HistoryApi {
   setCopy(serverId: string, mode: '' | 'on' | 'off'): Promise<void>
 }
 
+export interface TunnelsApi {
+  list(serverId: string): Promise<TunnelState[]>
+  /** Rejects with a readable message, for example when the port is already in use. */
+  start(serverId: string, id: string): Promise<void>
+  stop(serverId: string, id: string): Promise<void>
+  /** Hears about changes to a server's tunnels. Returns a function that stops listening. */
+  onChange(serverId: string, cb: (t: TunnelState[]) => void): () => void
+}
+
 export interface Backend {
   files: FilesApi
+  tunnels: TunnelsApi
   history: HistoryApi
   connect(server: Server, vpn: Vpn | undefined, onSteps: (steps: Step[]) => void): Promise<void>
   confirmManualVpn(serverId: string): void
@@ -119,8 +129,26 @@ function makeAnalysis(server: Server): Analysis {
 
 const manual = new Map<string, () => void>()
 
+const mockTunnels: TunnelsApi = (() => {
+  const running = new Set<string>()
+  const subs = new Map<string, Set<(t: TunnelState[]) => void>>()
+  const list = (sid: string): TunnelState[] =>
+    (demoServers.get(sid)?.tunnels ?? []).map((t) => ({ id: t.id, state: running.has(sid + '/' + t.id) ? 'running' : 'stopped', conns: running.has(sid + '/' + t.id) ? 2 : 0 }))
+  const push = (sid: string) => subs.get(sid)?.forEach((cb) => cb(list(sid)))
+  return {
+    list: async (sid) => list(sid),
+    start: async (sid, id) => (running.add(sid + '/' + id), push(sid)),
+    stop: async (sid, id) => (running.delete(sid + '/' + id), push(sid)),
+    onChange(sid, cb) {
+      subs.set(sid, (subs.get(sid) ?? new Set()).add(cb))
+      return () => void subs.get(sid)?.delete(cb)
+    },
+  }
+})()
+
 export const mockBackend: Backend = {
   files: mockFiles,
+  tunnels: mockTunnels,
   history: mockHistory,
   async connect(server, vpn, onSteps) {
     demoServers.set(server.id, server)

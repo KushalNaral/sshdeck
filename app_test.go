@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"io"
+	"net"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -149,6 +150,24 @@ type fakeClient struct {
 	runs   []string
 	ftp    *sftp.Client
 	exec   func(ctx context.Context, cmd string, stdin io.Reader, stdout io.Writer) error
+	dialed []string // addresses reached through Dial
+}
+
+func (f *fakeClient) dials() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]string(nil), f.dialed...)
+}
+
+// Dial and Listen use this machine's network, which is enough to test forwards end to end.
+func (f *fakeClient) Dial(network, addr string) (net.Conn, error) {
+	f.mu.Lock()
+	f.dialed = append(f.dialed, addr)
+	f.mu.Unlock()
+	return net.Dial(network, addr)
+}
+func (f *fakeClient) Listen(network, addr string) (net.Listener, error) {
+	return net.Listen(network, addr)
 }
 
 func (f *fakeClient) Exec(ctx context.Context, cmd string, stdin io.Reader, stdout io.Writer) error {

@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/user"
 	"path/filepath"
 	"strings"
 
@@ -90,6 +91,41 @@ func (a *App) importFile(path string) (ImportPreview, error) {
 	if err != nil {
 		return ImportPreview{}, err
 	}
+	return a.stage(path, rows), nil
+}
+
+// PickSSHConfig asks for an OpenSSH config file (starting in ~/.ssh) and previews the hosts in it.
+func (a *App) PickSSHConfig() (ImportPreview, error) {
+	home, _ := os.UserHomeDir()
+	path, err := runtime.OpenFileDialog(a.ctx, runtime.OpenDialogOptions{Title: "Import hosts from an SSH config", DefaultDirectory: filepath.Join(home, ".ssh")})
+	if err != nil || path == "" {
+		return ImportPreview{}, err
+	}
+	return a.importSSHConfig(path)
+}
+
+func (a *App) importSSHConfig(path string) (ImportPreview, error) {
+	if a.isLocked() {
+		return ImportPreview{}, store.ErrLocked
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return ImportPreview{}, err
+	}
+	defer f.Close()
+	name, home := "", ""
+	if u, err := user.Current(); err == nil {
+		name, home = u.Username, u.HomeDir
+	}
+	rows := importer.ParseSSHConfig(f, name, home)
+	if len(rows) == 0 {
+		return ImportPreview{}, errors.New("no Host entries found; wildcard hosts and Match blocks are skipped")
+	}
+	return a.stage(path, rows), nil
+}
+
+// stage keeps parsed rows until ApplyImport and returns the preview of them.
+func (a *App) stage(path string, rows []importer.Row) ImportPreview {
 	tok := make([]byte, 8)
 	_, _ = rand.Read(tok)
 	p := &pending{token: hex.EncodeToString(tok), rows: rows}
@@ -108,7 +144,7 @@ func (a *App) importFile(path string) (ImportPreview, error) {
 		}
 		pv.Rows = append(pv.Rows, row)
 	}
-	return pv, nil
+	return pv
 }
 
 func (a *App) exists(r importer.Row) bool {
@@ -185,6 +221,23 @@ func (a *App) ApplyImport(token string, picked []int) (ImportResult, error) {
 				continue
 			}
 			count(existed)
+		}
+	}
+	for i, r := range p.rows { // a jump host can be anywhere in the file, so link them once every server is saved
+		if !use[i] || r.Type != "server" || r.JumpName == "" {
+			continue
+		}
+		sv, ok := a.serverByName(r.Name)
+		hop, hok := a.serverByName(r.JumpName)
+		switch {
+		case !ok:
+		case !hok:
+			fail(r, fmt.Errorf("jump host %q was not imported or saved", r.JumpName))
+		default:
+			sv.JumpID = hop.ID
+			if _, err := a.st.SaveServer(sv, ""); err != nil {
+				fail(r, err)
+			}
 		}
 	}
 	a.audit("import", "csv", fmt.Sprintf("%d added, %d updated, %d failed", res.Added, res.Updated, len(res.Failures)))

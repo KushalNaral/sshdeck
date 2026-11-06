@@ -5,6 +5,7 @@ import { Admin } from './components/Admin'
 import { LockScreen } from './components/LockScreen'
 import { Confirm } from './components/Confirm'
 import { Connection } from './components/Connection'
+import { Tunnels } from './components/Tunnels'
 import { Mark } from './components/Mark'
 import { Analysis } from './components/Analysis'
 import { Logins } from './components/Logins'
@@ -19,7 +20,7 @@ import { HistoryPanel } from './components/HistoryPanel'
 import { auditApi } from './lib/audit'
 import { configStore, messageOf, type Config } from './lib/config'
 import { useNow } from './lib/now'
-import { vpnOf } from './lib/status'
+import { vpnOf, vpnsInTheWay } from './lib/status'
 import { triage } from './lib/triage'
 import { lockApi, type LockState } from './lib/lock'
 import { applyTheme, loadTheme, THEMES } from './lib/theme'
@@ -52,7 +53,7 @@ export default function App() {
   useEffect(() => {
     if (mode !== 'admin') setAdminTab(undefined)
   }, [mode])
-  const [ask, setAsk] = useState<{ title: string; body: string; label: string; run: () => void; cancelled?: () => void } | null>(null)
+  const [ask, setAsk] = useState<{ title: string; body: string; label: string; run: () => void; alt?: { label: string; run: () => void }; cancelled?: () => void } | null>(null)
   const [layout, setLayoutState] = useState(loadLayout)
   const setLayout = useCallback((f: (l: Layout) => Layout) => setLayoutState((l) => {
     const n = sanitize(f(l))
@@ -175,13 +176,35 @@ export default function App() {
   // Resolves when the connect has finished, or when the question was answered No.
   const requestConnect = (id: string): Promise<void> => {
     const sv = latest.current.servers.find((x) => x.id === id)
-    if (!sv?.production) return connect(id)
+    const go = (): Promise<void> => {
+      if (!sv?.production) return connect(id)
+      return new Promise((resolve) =>
+        setAsk({
+          title: `Connect to ${sv.name}?`,
+          body: `${sv.name} is a production server. You will be signed in as ${sv.user}@${sv.host}.`,
+          label: 'Connect to production',
+          run: () => (auditApi.confirm(id, 'connect'), void connect(id).then(resolve)),
+          cancelled: resolve,
+        }),
+      )
+    }
+    const [busy] = sv ? vpnsInTheWay(sv, latest.current.servers, latest.current.vpns, sessionsRef.current) : []
+    if (!sv || !busy) return go()
+    const own = vpnOf(sv, latest.current.vpns)?.name ?? 'this VPN'
+    const names = busy.servers.map((s) => s.name).join(', ')
     return new Promise((resolve) =>
       setAsk({
-        title: `Connect to ${sv.name}?`,
-        body: `${sv.name} is a production server. You will be signed in as ${sv.user}@${sv.host}.`,
-        label: 'Connect to production',
-        run: () => (auditApi.confirm(id, 'connect'), void connect(id).then(resolve)),
+        title: `${busy.vpn.name} is already connected`,
+        body: `${busy.vpn.name} is up for ${names}. Connecting ${own} as well can break routes and DNS for both, and SSH then times out.`,
+        label: 'Connect both',
+        run: () => void go().then(resolve),
+        alt: {
+          label: `Switch to ${own}`,
+          run: () => {
+            busy.servers.forEach((s) => disconnect(s.id))
+            void go().then(resolve)
+          },
+        },
         cancelled: resolve,
       }),
     )
@@ -486,7 +509,7 @@ export default function App() {
           ) : side === 'files' ? (
             <FilesPanel serverId={selected} serverName={server.name} live={live} backend={backend} onEdit={(t, p) => openDoc(selected, p, false, t)} onHistory={(t, p) => openDoc(selected, p, true, t)} layout={layout} onLayout={setLayout} />
           ) : (
-            <Analysis server={server} triage={levels[server.id]} data={analysis[selected]} scanning={scanning === selected} error={scanErrors[selected]} connected={live} onExec={(c) => requestExec(selected, c)} onRescan={() => void scan(selected)} onTrack={(n, v) => trackSoftware(selected, n, v)} onCopySsh={() => attempt(() => configStore.copySSH(selected))} connection={<Connection server={server} vpns={vpns} session={sess} />} logins={<Logins server={server} onCopy={(l, f) => attempt(() => configStore.copyLogin(selected, l.id, f))} />} />
+            <Analysis server={server} triage={levels[server.id]} data={analysis[selected]} scanning={scanning === selected} error={scanErrors[selected]} connected={live} onExec={(c) => requestExec(selected, c)} onRescan={() => void scan(selected)} onTrack={(n, v) => trackSoftware(selected, n, v)} onCopySsh={() => attempt(() => configStore.copySSH(selected))} connection={<><Connection server={server} vpns={vpns} session={sess} /><Tunnels server={server} live={live} backend={backend} /></>} logins={<Logins server={server} onCopy={(l, f) => attempt(() => configStore.copyLogin(selected, l.id, f))} />} />
           )}
         </div>
         )}
@@ -534,6 +557,12 @@ export default function App() {
         title={ask.title}
         body={ask.body}
         confirmLabel={ask.label}
+        altLabel={ask.alt?.label}
+        onAlt={() => {
+          const run = ask.alt!.run
+          setAsk(null)
+          run()
+        }}
         onCancel={() => (ask.cancelled?.(), setAsk(null))}
         onConfirm={() => {
           const run = ask.run

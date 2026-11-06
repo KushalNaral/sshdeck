@@ -1,6 +1,6 @@
 import { useState, type ReactNode } from 'react'
 import { viaLabel } from '../lib/status'
-import type { Login, Server, Vpn, VpnKind } from '../types'
+import type { Login, Server, Tunnel, Vpn, VpnKind } from '../types'
 import { VPN_LABEL } from '../types'
 import { AuditPanel } from './AuditPanel'
 import { HistorySettingsPanel } from './HistorySettingsPanel'
@@ -50,7 +50,7 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 
 const Note = () => <p className="dim">Passwords go to the OS keyring, never to the data file. This browser demo keeps none.</p>
 
-function ServerForm({ initial, vpns, isNew, onSave, onCancel, onDelete, onDuplicate, logins }: { initial: Server; vpns: Vpn[]; isNew: boolean; onSave: Props['onSaveServer']; onCancel: () => void; onDelete: () => Promise<string | null>; onDuplicate: (s: Server) => void; logins?: ReactNode }) {
+function ServerForm({ initial, vpns, others, isNew, onSave, onCancel, onDelete, onDuplicate, logins }: { initial: Server; vpns: Vpn[]; others: Server[]; isNew: boolean; onSave: Props['onSaveServer']; onCancel: () => void; onDelete: () => Promise<string | null>; onDuplicate: (s: Server) => void; logins?: ReactNode }) {
   const [d, setD] = useState(initial)
   const [pw, setPw] = useState('')
   const [err, setErr] = useState<string | null>(null)
@@ -118,6 +118,14 @@ function ServerForm({ initial, vpns, isNew, onSave, onCancel, onDelete, onDuplic
           <option value="__req">Needs a VPN, not set yet</option>
         </select>
       </Field>
+      <Field label="Jump through">
+        <select value={d.jumpId ?? ''} onChange={(e) => set('jumpId', e.target.value || undefined)} title="Log in to this server by way of another one, as ssh -J does. If this server has no VPN, the jump host's VPN is used.">
+          <option value="">Nothing, connect directly</option>
+          {others.map((o) => (
+            <option key={o.id} value={o.id}>{o.name}</option>
+          ))}
+        </select>
+      </Field>
       <Field label="Tracked software">
         <div style={{ display: 'grid', gap: 6 }}>
           {d.software.map((x, i) => {
@@ -136,6 +144,35 @@ function ServerForm({ initial, vpns, isNew, onSave, onCancel, onDelete, onDuplic
           <div>
             <button className="btn" type="button" onClick={() => setD((p) => ({ ...p, software: [...p.software, { name: '', version: '', target: '' }] }))}>
               Add software
+            </button>
+          </div>
+        </div>
+      </Field>
+      <Field label="Tunnels">
+        <div style={{ display: 'grid', gap: 6 }}>
+          {(d.tunnels ?? []).map((x, i) => {
+            const edit = (k: keyof Tunnel, v: string | boolean) => setD((p) => ({ ...p, tunnels: (p.tunnels ?? []).map((y, j) => (j === i ? { ...y, [k]: v } : y)) }))
+            return (
+              <div key={i} style={{ display: 'grid', gridTemplateColumns: '1fr 86px 1fr 1.2fr auto auto', gap: 6, alignItems: 'center' }}>
+                <input aria-label="Tunnel name" value={x.name} placeholder="Database" onChange={(e) => edit('name', e.target.value)} />
+                <select aria-label={`${x.name || 'Tunnel'} direction`} value={x.kind} onChange={(e) => edit('kind', e.target.value)} title="Local: a port here reaches the target from the server. Remote: a port on the server reaches the target from here.">
+                  <option value="local">Local</option>
+                  <option value="remote">Remote</option>
+                </select>
+                <input aria-label={`${x.name || 'Tunnel'} listen address`} value={x.listen} placeholder="5433" onChange={(e) => edit('listen', e.target.value)} />
+                <input aria-label={`${x.name || 'Tunnel'} target`} value={x.target} placeholder="db.internal:5432" onChange={(e) => edit('target', e.target.value)} />
+                <label title="Start when the server connects" style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+                  <input type="checkbox" checked={!!x.auto} onChange={(e) => edit('auto', e.target.checked)} /> Auto
+                </label>
+                <button className="btn" type="button" aria-label={`Remove ${x.name || 'tunnel'}`} onClick={() => setD((p) => ({ ...p, tunnels: (p.tunnels ?? []).filter((_, j) => j !== i) }))}>
+                  Remove
+                </button>
+              </div>
+            )
+          })}
+          <div>
+            <button className="btn" type="button" onClick={() => setD((p) => ({ ...p, tunnels: [...(p.tunnels ?? []), { id: '', name: '', kind: 'local', listen: '', target: '' }] }))}>
+              Add tunnel
             </button>
           </div>
         </div>
@@ -329,6 +366,7 @@ export function Admin({ servers, vpns, lock, onLockChange, onSaveServer, onDelet
             initial={editing === 'new' ? (copyOf ?? blankServer()) : server!}
             onDuplicate={(s) => (setCopyOf({ ...s, id: '', name: `${s.name} copy`, autoConnect: false, logins: undefined }), setEditing('new'))}
             vpns={vpns}
+            others={servers.filter((x) => x.id !== editing)}
             isNew={editing === 'new'}
             logins={editing !== 'new' && <LoginsEditor logins={server?.logins ?? []} onSave={(l, pw) => onSaveLogin(editing, l, pw)} onDelete={(id) => onDeleteLogin(editing, id)} />}
             onSave={async (s, pw) => { const m = await onSaveServer(s, pw); if (!m) setEditing(null); return m }}

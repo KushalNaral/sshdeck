@@ -34,6 +34,7 @@ const fromGoServer = (g: any): Server => ({
   vpnId: g.vpnId || null,
   os: g.os ?? '',
   logins: g.logins ?? [],
+  tunnels: g.tunnels ?? [],
   software: (g.software ?? []).map((x: any) => ({ name: x.name, version: x.version ?? '', target: x.target ?? '' })),
   projects: g.projects ?? [],
   mark: g.vpnId || g.vpnRequired ? 'hollow' : 'filled',
@@ -88,7 +89,7 @@ const localStore: ConfigStore = (() => {
       return (cfg = { servers: SERVERS, vpns: VPNS, tasks: [] })
     },
     async saveServer(s) {
-      s = { ...s, id: s.id || `s-${Date.now().toString(36)}`, logins: cfg!.servers.find((x) => x.id === s.id)?.logins }
+      s = { ...s, id: s.id || `s-${Date.now().toString(36)}`, logins: cfg!.servers.find((x) => x.id === s.id)?.logins, tunnels: (s.tunnels ?? []).map((t) => ({ ...t, id: t.id || `t-${Math.random().toString(36).slice(2, 8)}` })) }
       cfg = { ...cfg!, servers: upsert(cfg!.servers, s) }
       persist()
       return s
