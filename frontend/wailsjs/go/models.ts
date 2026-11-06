@@ -79,6 +79,30 @@ export namespace main {
 	        this.installable = source["installable"];
 	    }
 	}
+	export class FileEntry {
+	    name: string;
+	    path: string;
+	    dir: boolean;
+	    link: boolean;
+	    size: number;
+	    mode: string;
+	    mtime: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new FileEntry(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.path = source["path"];
+	        this.dir = source["dir"];
+	        this.link = source["link"];
+	        this.size = source["size"];
+	        this.mode = source["mode"];
+	        this.mtime = source["mtime"];
+	    }
+	}
 	export class ImportRow {
 	    index: number;
 	    line: number;
@@ -154,6 +178,38 @@ export namespace main {
 	    }
 	}
 	
+	export class Listing {
+	    path: string;
+	    entries: FileEntry[];
+	
+	    static createFrom(source: any = {}) {
+	        return new Listing(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.path = source["path"];
+	        this.entries = this.convertValues(source["entries"], FileEntry);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
 	export class LockInfo {
 	    enabled: boolean;
 	    locked: boolean;
@@ -174,6 +230,50 @@ export namespace main {
 	        this.autoReconnect = source["autoReconnect"];
 	    }
 	}
+	export class TextFile {
+	    path: string;
+	    content: string;
+	    version: string;
+	    mode: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new TextFile(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.path = source["path"];
+	        this.content = source["content"];
+	        this.version = source["version"];
+	        this.mode = source["mode"];
+	    }
+	}
+	export class Transfer {
+	    id: string;
+	    serverId: string;
+	    name: string;
+	    up: boolean;
+	    done: number;
+	    total: number;
+	    state: string;
+	    error?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new Transfer(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.serverId = source["serverId"];
+	        this.name = source["name"];
+	        this.up = source["up"];
+	        this.done = source["done"];
+	        this.total = source["total"];
+	        this.state = source["state"];
+	        this.error = source["error"];
+	    }
+	}
 	export class UpdateStatus {
 	    version: string;
 	    autoCheck: boolean;
@@ -186,6 +286,26 @@ export namespace main {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.version = source["version"];
 	        this.autoCheck = source["autoCheck"];
+	    }
+	}
+	export class UploadResult {
+	    started: number;
+	    conflicts?: string[];
+	    paths?: string[];
+	    dest?: string;
+	    cancelled?: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new UploadResult(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.started = source["started"];
+	        this.conflicts = source["conflicts"];
+	        this.paths = source["paths"];
+	        this.dest = source["dest"];
+	        this.cancelled = source["cancelled"];
 	    }
 	}
 

@@ -39,13 +39,14 @@ process is in Go. The UI asks, Go acts, and Go pushes progress back as events.
 |---|---|---|
 | `main`, `app.go` | Window setup (CSP-friendly options, single instance), the `App` struct, lifecycle (startup, shutdown, confirm-on-close), CRUD pass-through to the store | `App` |
 | `conn.go` | Connect flow, shells and tabs on one shared SSH connection, container shells, analysis entry point | `Connect`, `AttachShell`, `OpenContainerShell`, `Analyze` |
+| `files.go`, `transfers.go` | Remote files over SFTP (list, read, save, rename, delete) and the upload/download queue | `ListDir`, `ReadText`, `WriteText`, `Upload`, `Download`, `Transfer` |
 | `lock.go`, `settings.go` | Passphrase lock, idle timeout, lock settings, audit view bindings | `Lock`, `Unlock`, `EnableLock`, `DisableLock`, `ListAudit` |
 | `perm.go` | Startup check that the config directory and files are private | `checkConfigDir` |
 | `deps.go` | Check and install the programs sshdeck needs (VPN clients) | `CheckDependencies`, `InstallDependencies` |
 | `internal/store` | Servers, VPN profiles and tasks; passwords in a `Secrets` backend, or everything inside the encrypted vault when the lock is on | `Store`, `Server`, `VPN`, `Task`, `Secrets`, `Keyring` |
 | `internal/vault` | Argon2id key derivation and XChaCha20-Poly1305 sealing of the vault file | `Key`, `NewKey`, `Open` |
 | `internal/audit` | Append-only, hash-chained log of what was done | `Log`, `Entry`, `Verify` |
-| `internal/sshx` | SSH login (password, key file or ssh-agent) with host-key trust and keepalive; one connection shared by many shells and commands | `Client`, `Dial`, `Session` |
+| `internal/sshx` | SSH login (password, key file or ssh-agent) with host-key trust and keepalive; one connection shared by many shells, commands and the SFTP client | `Client`, `Dial`, `Session` |
 | `internal/vpn` | Start and stop VPN client processes and watch their output | `Manager`, `Starter`, `Proc`, `CertError` |
 | `internal/probe` | Run read-only commands and parse them into a report | `Analyze`, `Report`, `Run` |
 | `internal/importer` | Read the master `.ods` project list | `ReadODS`, `Projects`, `Sheet.Pairs` |
@@ -149,6 +150,35 @@ in again on a fresh connection.
   `exec [sudo] docker exec -it [-u USER] NAME sh -c '…bash || sh'` into it. Container and user names are matched
   against strict patterns first, so nothing shell-special reaches the line. `exec` replaces the login shell, so
   leaving the container ends the tab.
+
+### Files and the editor
+
+`Client.SFTP()` opens an SFTP subsystem on the same SSH connection, once, and every file call reuses it. No second
+login is made, so nothing extra reaches the server's rate limits. The file calls (`files.go`) need a live
+connection and fail with "not connected" otherwise.
+
+- **Browsing:** `ListDir` resolves the path on the server, sorts folders first and follows symlinks to see whether
+  they open like folders.
+- **Editing:** `ReadText` refuses files over 2 MB, files that are not valid UTF-8 and files with NUL bytes, and
+  returns a version (mtime and size). `WriteText` compares that version with the file as it is now and refuses
+  with "changed on the server" when they differ; the UI then offers overwrite or reload. The content goes to
+  `name.sshdeck-part`, takes the old file's permissions and is renamed over it (POSIX rename where the server has
+  it), so a dropped link never leaves half a file. In a folder you cannot write to, it writes the file itself.
+- **Transfers:** every item you start is one `Transfer` in a queue (three run at a time). Progress goes to the UI
+  as a `transfers` event, at most ten a second. Folders are walked first to get a total, then copied as one
+  transfer. Files land under a `.sshdeck-part` name and are renamed when complete; a cancel or failure removes the
+  partial file. Names that already exist are handled by a policy: `ask` starts nothing and returns the clashing
+  names, then the UI calls again with `skip`, `replace` or `keep` (writes `name (2).ext`). Replacing a folder merges.
+- **Names from the server are untrusted.** A download only accepts plain names, so a server cannot send
+  `../../.bashrc` and write outside the chosen folder (`safeName`).
+- **Dropped files:** the window runs with `EnableFileDrop`; Go reports the paths and the drop position as a
+  `files:dropped` event, and the panel decides which folder was under the pointer.
+- **Audit:** open, save, create, rename, delete and each transfer are logged with the server and path, never the
+  content.
+
+The editor is Monaco, loaded the first time a file is opened. Each open file keeps its own editor, hidden while
+another tab is in front, so edits and undo history survive switching tabs. Languages are bundled (highlighting,
+plus Monaco's own JSON, TypeScript, CSS and HTML services). There are no language servers; that is not built.
 
 ## 6. VPN
 
@@ -276,7 +306,7 @@ embedded key replaced; a backup is kept outside the repository.
 
 ## 8. Frontend
 
-React + TypeScript + Vite, Tailwind v4, xterm.js, lucide-react. The design direction ("Timetable Slide Rack") and
+React + TypeScript + Vite, Tailwind v4, xterm.js, Monaco, lucide-react. The design direction ("Timetable Slide Rack") and
 its rules are in `PRODUCT.md` and `.impeccable/surfaces/frontend-src-app-tsx.md`.
 
 ```
@@ -285,9 +315,10 @@ api.ts               the Backend interface, ConnectError, and the demo mockBacke
 wailsBackend.ts      Backend implemented with the Wails bindings and events
 backend.ts           picks wailsBackend inside the window, mockBackend in a plain browser
 lib/config.ts        ConfigStore: Go store inside Wails, localStorage demo data otherwise
-components/          Rack, ConnectBar, Connection, TerminalPane/Term, Analysis, TasksBoard, Palette, Admin,
+components/          Rack, ConnectBar, Connection, TerminalPane/Term, FilesPanel, Editor, Analysis, TasksBoard, Palette, Admin,
                      SystemPanel, SecurityPanel, AuditPanel, LockScreen, Confirm
-lib/                 config, lock, audit, theme, version, status
+lib/                 config, lock, audit, theme, version, status, files, monaco
+mockFiles.ts         demo file tree for the browser preview
 ```
 
 Because `Backend` is an interface, `npm run dev` runs the whole UI in a normal browser against fake data, which is
@@ -366,4 +397,6 @@ memory while in use.
   reported above.
 - `govulncheck` reports one advisory in `golang.org/x/crypto` v0.58.0 that sshdeck does not call; the fix exists only
   on an untagged commit, so upgrade when a release carries it.
+- Files: no resume for interrupted transfers, no permission editing, no symlink creation, and files over 2 MB
+  cannot be edited in the app. The editor has no language servers.
 - Organisation mode (central inventory, OIDC, per-user access) is designed in [ORG-MODE.md](ORG-MODE.md), not built.

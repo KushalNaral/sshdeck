@@ -10,6 +10,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/pkg/sftp"
+
 	"github.com/KushalNaral/sshdeck/internal/sshx"
 	"github.com/KushalNaral/sshdeck/internal/store"
 	"github.com/KushalNaral/sshdeck/internal/vpn"
@@ -144,6 +146,14 @@ type fakeClient struct {
 	dead   bool
 	shells int
 	runs   []string
+	ftp    *sftp.Client
+}
+
+func (f *fakeClient) SFTP() (*sftp.Client, error) {
+	if f.ftp == nil {
+		return nil, errors.New("no sftp")
+	}
+	return f.ftp, nil
 }
 
 func (f *fakeClient) Shell(ctx context.Context) (sshx.Session, error) {

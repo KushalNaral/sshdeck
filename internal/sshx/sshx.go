@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/pkg/sftp"
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/crypto/ssh/agent"
 	"golang.org/x/crypto/ssh/knownhosts"
@@ -175,6 +176,8 @@ type Client interface {
 	// Run runs one command and returns its stdout. A non-zero exit is an error that still carries what was printed.
 	// Cancelling ctx ends only this command, not the connection.
 	Run(ctx context.Context, cmd string) (string, error)
+	// SFTP returns the connection's file-transfer client, opened on first use and shared by every caller.
+	SFTP() (*sftp.Client, error)
 	// Done is closed when the connection has ended, whether by Close, a keepalive failure or the server.
 	Done() <-chan struct{}
 	// Close ends the connection and every shell on it. Safe to call twice.
@@ -183,6 +186,8 @@ type Client interface {
 
 type client struct {
 	c    *ssh.Client
+	fmu  sync.Mutex
+	ftp  *sftp.Client
 	done chan struct{}
 	once sync.Once
 }
@@ -199,9 +204,30 @@ func Dial(ctx context.Context, srv store.Server, secret string) (Client, error) 
 	return k, nil
 }
 
+func (k *client) SFTP() (*sftp.Client, error) {
+	k.fmu.Lock()
+	defer k.fmu.Unlock()
+	if k.ftp == nil {
+		f, err := sftp.NewClient(k.c)
+		if err != nil {
+			return nil, fmt.Errorf("the server does not offer file transfer (SFTP): %w", err)
+		}
+		k.ftp = f
+	}
+	return k.ftp, nil
+}
+
 func (k *client) Done() <-chan struct{} { return k.done }
 func (k *client) Close() error {
-	k.once.Do(func() { close(k.done); k.c.Close() })
+	k.once.Do(func() {
+		close(k.done)
+		k.fmu.Lock()
+		if k.ftp != nil {
+			k.ftp.Close()
+		}
+		k.fmu.Unlock()
+		k.c.Close()
+	})
 	return nil
 }
 

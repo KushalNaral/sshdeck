@@ -160,3 +160,42 @@ export const VPN_LABEL: Record<VpnKind, string> = {
   gp: 'GlobalProtect',
   hillstone: 'Hillstone (manual)',
 }
+
+export interface FileEntry {
+  name: string
+  path: string
+  dir: boolean
+  link: boolean
+  size: number
+  mode: string
+  mtime: number
+}
+export interface Listing {
+  path: string
+  entries: FileEntry[]
+}
+export interface TextFile {
+  path: string
+  content: string
+  version: string
+  mode: string
+}
+export interface Transfer {
+  id: string
+  serverId: string
+  name: string
+  up: boolean
+  done: number
+  total: number
+  state: 'queued' | 'running' | 'done' | 'failed' | 'cancelled'
+  error?: string
+}
+/** What starting a transfer did. With policy "ask" and names already taken, nothing starts and conflicts lists them. */
+export interface StartResult {
+  started: number
+  conflicts?: string[]
+  paths?: string[]
+  dest?: string
+  cancelled?: boolean
+}
+export type Policy = 'ask' | 'skip' | 'replace' | 'keep'

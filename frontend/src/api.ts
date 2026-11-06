@@ -1,7 +1,32 @@
-import type { Analysis, Dep, Link, Server, Step, Vpn } from './types'
+import type { Analysis, Dep, Link, Listing, Policy, Server, StartResult, Step, TextFile, Transfer, Vpn } from './types'
+import { mockFiles } from './mockFiles'
 
 /** Everything the UI needs from the Go side. The Wails bindings will implement this same shape. */
+/** Files on the server (SFTP) and the transfer queue. Every call needs a live connection. */
+export interface FilesApi {
+  list(serverId: string, dir: string): Promise<Listing>
+  read(serverId: string, path: string): Promise<TextFile>
+  /** Returns the new version. Rejects with a message containing "changed on the server" when someone else saved first. */
+  write(serverId: string, path: string, content: string, version: string): Promise<string>
+  mkdir(serverId: string, path: string): Promise<void>
+  newFile(serverId: string, path: string): Promise<void>
+  rename(serverId: string, from: string, to: string): Promise<void>
+  remove(serverId: string, paths: string[]): Promise<void>
+  pickUpload(serverId: string, dir: string, folder: boolean): Promise<StartResult>
+  upload(serverId: string, dir: string, locals: string[], policy: Policy): Promise<StartResult>
+  pickDownload(serverId: string, remotes: string[]): Promise<StartResult>
+  download(serverId: string, remotes: string[], dir: string, policy: Policy): Promise<StartResult>
+  cancel(id: string): void
+  retry(id: string): void
+  clear(): void
+  /** Hears the whole queue each time it changes; calls back once with the current queue. */
+  onTransfers(cb: (t: Transfer[]) => void): () => void
+  /** Hears files dropped on the window from the desktop. */
+  onDrop(cb: (d: { x: number; y: number; paths: string[] }) => void): () => void
+}
+
 export interface Backend {
+  files: FilesApi
   connect(server: Server, vpn: Vpn | undefined, onSteps: (steps: Step[]) => void): Promise<void>
   confirmManualVpn(serverId: string): void
   disconnect(serverId: string): void
@@ -74,6 +99,7 @@ function makeAnalysis(server: Server): Analysis {
 const manual = new Map<string, () => void>()
 
 export const mockBackend: Backend = {
+  files: mockFiles,
   async connect(server, vpn, onSteps) {
     demoServers.set(server.id, server)
     const steps: Step[] = []

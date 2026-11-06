@@ -14,6 +14,10 @@ export function AttachShell(arg1, arg2, arg3, arg4) {
   return window['go']['main']['App']['AttachShell'](arg1, arg2, arg3, arg4);
 }
 
+export function CancelTransfer(arg1) {
+  return window['go']['main']['App']['CancelTransfer'](arg1);
+}
+
 export function ChangePassphrase(arg1, arg2) {
   return window['go']['main']['App']['ChangePassphrase'](arg1, arg2);
 }
@@ -24,6 +28,10 @@ export function CheckDependencies() {
 
 export function CheckUpdate() {
   return window['go']['main']['App']['CheckUpdate']();
+}
+
+export function ClearTransfers() {
+  return window['go']['main']['App']['ClearTransfers']();
 }
 
 export function CloseShell(arg1, arg2) {
@@ -44,6 +52,10 @@ export function CopyLogin(arg1, arg2, arg3) {
 
 export function CopySSHCommand(arg1) {
   return window['go']['main']['App']['CopySSHCommand'](arg1);
+}
+
+export function Delete(arg1, arg2) {
+  return window['go']['main']['App']['Delete'](arg1, arg2);
 }
 
 export function DeleteLogin(arg1, arg2) {
@@ -70,6 +82,10 @@ export function Disconnect(arg1) {
   return window['go']['main']['App']['Disconnect'](arg1);
 }
 
+export function Download(arg1, arg2, arg3, arg4) {
+  return window['go']['main']['App']['Download'](arg1, arg2, arg3, arg4);
+}
+
 export function EnableLock(arg1) {
   return window['go']['main']['App']['EnableLock'](arg1);
 }
@@ -94,6 +110,10 @@ export function ListAudit(arg1) {
   return window['go']['main']['App']['ListAudit'](arg1);
 }
 
+export function ListDir(arg1, arg2) {
+  return window['go']['main']['App']['ListDir'](arg1, arg2);
+}
+
 export function ListServers() {
   return window['go']['main']['App']['ListServers']();
 }
@@ -114,20 +134,48 @@ export function LockState() {
   return window['go']['main']['App']['LockState']();
 }
 
+export function Mkdir(arg1, arg2) {
+  return window['go']['main']['App']['Mkdir'](arg1, arg2);
+}
+
+export function NewFile(arg1, arg2) {
+  return window['go']['main']['App']['NewFile'](arg1, arg2);
+}
+
 export function OpenContainerShell(arg1, arg2, arg3, arg4, arg5) {
   return window['go']['main']['App']['OpenContainerShell'](arg1, arg2, arg3, arg4, arg5);
+}
+
+export function PickDownload(arg1, arg2) {
+  return window['go']['main']['App']['PickDownload'](arg1, arg2);
 }
 
 export function PickImport() {
   return window['go']['main']['App']['PickImport']();
 }
 
+export function PickUpload(arg1, arg2, arg3) {
+  return window['go']['main']['App']['PickUpload'](arg1, arg2, arg3);
+}
+
+export function ReadText(arg1, arg2) {
+  return window['go']['main']['App']['ReadText'](arg1, arg2);
+}
+
 export function RecordConfirm(arg1, arg2) {
   return window['go']['main']['App']['RecordConfirm'](arg1, arg2);
 }
 
+export function Rename(arg1, arg2, arg3) {
+  return window['go']['main']['App']['Rename'](arg1, arg2, arg3);
+}
+
 export function RestartApp() {
   return window['go']['main']['App']['RestartApp']();
+}
+
+export function RetryTransfer(arg1) {
+  return window['go']['main']['App']['RetryTransfer'](arg1);
 }
 
 export function SaveLogin(arg1, arg2, arg3) {
@@ -174,6 +222,10 @@ export function Touch() {
   return window['go']['main']['App']['Touch']();
 }
 
+export function Transfers() {
+  return window['go']['main']['App']['Transfers']();
+}
+
 export function Unlock(arg1) {
   return window['go']['main']['App']['Unlock'](arg1);
 }
@@ -182,6 +234,14 @@ export function UpdateStatus() {
   return window['go']['main']['App']['UpdateStatus']();
 }
 
+export function Upload(arg1, arg2, arg3, arg4) {
+  return window['go']['main']['App']['Upload'](arg1, arg2, arg3, arg4);
+}
+
 export function VerifyAudit() {
   return window['go']['main']['App']['VerifyAudit']();
+}
+
+export function WriteText(arg1, arg2, arg3, arg4) {
+  return window['go']['main']['App']['WriteText'](arg1, arg2, arg3, arg4);
 }

@@ -13,11 +13,15 @@ export function ApplyImport(arg1:string,arg2:Array<number>):Promise<main.ImportR
 
 export function AttachShell(arg1:string,arg2:number,arg3:number,arg4:number):Promise<void>;
 
+export function CancelTransfer(arg1:string):Promise<void>;
+
 export function ChangePassphrase(arg1:string,arg2:string):Promise<void>;
 
 export function CheckDependencies():Promise<Array<main.Dep>>;
 
 export function CheckUpdate():Promise<update.Info>;
+
+export function ClearTransfers():Promise<void>;
 
 export function CloseShell(arg1:string,arg2:number):Promise<void>;
 
@@ -28,6 +32,8 @@ export function Connect(arg1:string):Promise<main.ConnectResult>;
 export function CopyLogin(arg1:string,arg2:string,arg3:string):Promise<void>;
 
 export function CopySSHCommand(arg1:string):Promise<void>;
+
+export function Delete(arg1:string,arg2:Array<string>):Promise<void>;
 
 export function DeleteLogin(arg1:string,arg2:string):Promise<void>;
 
@@ -41,6 +47,8 @@ export function DisableLock(arg1:string):Promise<void>;
 
 export function Disconnect(arg1:string):Promise<void>;
 
+export function Download(arg1:string,arg2:Array<string>,arg3:string,arg4:string):Promise<main.UploadResult>;
+
 export function EnableLock(arg1:string):Promise<Array<string>>;
 
 export function ExportCSV():Promise<string>;
@@ -53,6 +61,8 @@ export function InstallUpdate():Promise<void>;
 
 export function ListAudit(arg1:number):Promise<Array<audit.Entry>>;
 
+export function ListDir(arg1:string,arg2:string):Promise<main.Listing>;
+
 export function ListServers():Promise<Array<store.Server>>;
 
 export function ListTasks():Promise<Array<store.Task>>;
@@ -63,13 +73,27 @@ export function Lock():Promise<void>;
 
 export function LockState():Promise<main.LockInfo>;
 
+export function Mkdir(arg1:string,arg2:string):Promise<void>;
+
+export function NewFile(arg1:string,arg2:string):Promise<void>;
+
 export function OpenContainerShell(arg1:string,arg2:number,arg3:string,arg4:string,arg5:boolean):Promise<void>;
+
+export function PickDownload(arg1:string,arg2:Array<string>):Promise<main.UploadResult>;
 
 export function PickImport():Promise<main.ImportPreview>;
 
+export function PickUpload(arg1:string,arg2:string,arg3:boolean):Promise<main.UploadResult>;
+
+export function ReadText(arg1:string,arg2:string):Promise<main.TextFile>;
+
 export function RecordConfirm(arg1:string,arg2:string):Promise<void>;
 
+export function Rename(arg1:string,arg2:string,arg3:string):Promise<void>;
+
 export function RestartApp():Promise<void>;
+
+export function RetryTransfer(arg1:string):Promise<void>;
 
 export function SaveLogin(arg1:string,arg2:store.Login,arg3:string):Promise<store.Login>;
 
@@ -93,8 +117,14 @@ export function TermWrite(arg1:string,arg2:number,arg3:string):Promise<void>;
 
 export function Touch():Promise<void>;
 
+export function Transfers():Promise<Array<main.Transfer>>;
+
 export function Unlock(arg1:string):Promise<void>;
 
 export function UpdateStatus():Promise<main.UpdateStatus>;
 
+export function Upload(arg1:string,arg2:string,arg3:Array<string>,arg4:string):Promise<main.UploadResult>;
+
 export function VerifyAudit():Promise<audit.Check>;
+
+export function WriteText(arg1:string,arg2:string,arg3:string,arg4:string):Promise<string>;

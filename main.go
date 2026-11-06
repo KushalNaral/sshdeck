@@ -35,10 +35,12 @@ func main() {
 		// vault, known_hosts and the VPN lock file. A second launch brings the first to the front.
 		EnableDefaultContextMenu: false,
 		SingleInstanceLock:       &options.SingleInstanceLock{UniqueId: "dev.kushalnaral.sshdeck", OnSecondInstanceLaunch: app.secondLaunch},
-		OnStartup:                app.startup,
-		OnShutdown:               app.shutdown,
-		OnBeforeClose:            app.beforeClose,
-		Bind:                     []interface{}{app},
+		// Files dragged in from the desktop are reported to the file panel (see App.startup).
+		DragAndDrop:   &options.DragAndDrop{EnableFileDrop: true},
+		OnStartup:     app.startup,
+		OnShutdown:    app.shutdown,
+		OnBeforeClose: app.beforeClose,
+		Bind:          []interface{}{app},
 	})
 	if err != nil {
 		log.Fatal(err)

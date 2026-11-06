@@ -13,7 +13,8 @@ import { ConnectBar } from './components/ConnectBar'
 import { TasksBoard } from './components/TasksBoard'
 import { Palette } from './components/Palette'
 import { Rack } from './components/Rack'
-import { TerminalPane } from './components/TerminalPane'
+import { TerminalPane, type Doc } from './components/TerminalPane'
+import { FilesPanel } from './components/FilesPanel'
 import { auditApi } from './lib/audit'
 import { configStore, messageOf, type Config } from './lib/config'
 import { useNow } from './lib/now'
@@ -195,6 +196,25 @@ export default function App() {
       label: 'Open root shell',
       run: () => (auditApi.confirm(id, 'container'), addTab(id, c)),
     })
+  }
+  // Files open in the editor, per server. A tab shows a dot while it has unsaved changes.
+  const [docs, setDocs] = useState<Record<string, Doc[]>>({})
+  const [activeDoc, setActiveDoc] = useState<Record<string, string | null>>({})
+  const [side, setSide] = useState<'analysis' | 'files'>('analysis')
+  const openDoc = (id: string, path: string) => {
+    setDocs((d) => ((d[id] ?? []).some((x) => x.path === path) ? d : { ...d, [id]: [...(d[id] ?? []), { path, dirty: false }] }))
+    setActiveDoc((a) => ({ ...a, [id]: path }))
+  }
+  const docsRef = useRef(docs)
+  docsRef.current = docs
+  const dropDoc = (id: string, path: string) => {
+    const rest = (docsRef.current[id] ?? []).filter((x) => x.path !== path)
+    setDocs((d) => ({ ...d, [id]: rest }))
+    setActiveDoc((a) => (a[id] === path ? { ...a, [id]: rest.length ? rest[rest.length - 1].path : null } : a))
+  }
+  const closeDoc = (id: string, path: string) => {
+    if (!docs[id]?.find((x) => x.path === path)?.dirty) return dropDoc(id, path)
+    setAsk({ title: `Close ${path.slice(path.lastIndexOf('/') + 1)} without saving?`, body: 'Your changes to this file will be lost.', label: 'Discard changes', run: () => dropDoc(id, path) })
   }
   const closeTab = (id: string, tab: number) =>
     patch(id, (s) => {
@@ -395,12 +415,31 @@ export default function App() {
             sessions={sessions}
             selected={selected}
             backend={backend}
-            onTab={(id, tab) => patch(id, (s) => ({ ...s, activeTab: tab }))}
+            onTab={(id, tab) => (setActiveDoc((a) => ({ ...a, [id]: null })), patch(id, (s) => ({ ...s, activeTab: tab })))}
+            docs={docs}
+            activeDoc={activeDoc}
+            onDoc={(id, path) => setActiveDoc((a) => ({ ...a, [id]: path }))}
+            onCloseDoc={closeDoc}
+            onDirty={(id, path, dirty) => setDocs((d) => ({ ...d, [id]: (d[id] ?? []).map((x) => (x.path === path && x.dirty !== dirty ? { ...x, dirty } : x)) }))}
             onAddTab={addTab}
             onCloseTab={closeTab}
           />
         </div>
-        <Analysis server={server} triage={levels[server.id]} data={analysis[selected]} scanning={scanning === selected} error={scanErrors[selected]} connected={live} onExec={(c) => requestExec(selected, c)} onRescan={() => void scan(selected)} onTrack={(n, v) => trackSoftware(selected, n, v)} onCopySsh={() => attempt(() => configStore.copySSH(selected))} connection={<Connection server={server} vpns={vpns} session={sess} />} logins={<Logins server={server} onCopy={(l, f) => attempt(() => configStore.copyLogin(selected, l.id, f))} />} />
+        <div className="side">
+          <div className="sidetabs" role="tablist" aria-label="Side panel">
+            <button role="tab" aria-selected={side === 'analysis'} onClick={() => setSide('analysis')}>
+              Analysis
+            </button>
+            <button role="tab" aria-selected={side === 'files'} onClick={() => setSide('files')} title="Browse, transfer and edit files on this server">
+              Files
+            </button>
+          </div>
+          {side === 'files' ? (
+            <FilesPanel serverId={selected} serverName={server.name} live={live} backend={backend} onEdit={(p) => openDoc(selected, p)} />
+          ) : (
+            <Analysis server={server} triage={levels[server.id]} data={analysis[selected]} scanning={scanning === selected} error={scanErrors[selected]} connected={live} onExec={(c) => requestExec(selected, c)} onRescan={() => void scan(selected)} onTrack={(n, v) => trackSoftware(selected, n, v)} onCopySsh={() => attempt(() => configStore.copySSH(selected))} connection={<Connection server={server} vpns={vpns} session={sess} />} logins={<Logins server={server} onCopy={(l, f) => attempt(() => configStore.copyLogin(selected, l.id, f))} />} />
+          )}
+        </div>
       </main>
       )}
 

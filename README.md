@@ -11,6 +11,7 @@ one is needed, logs in over SSH and opens a terminal. It also reads each server 
 - VPN profiles for FortiClient (`openfortivpn`) and GlobalProtect (`gpclient` or `openconnect`). Hillstone has no
   Linux client, so you connect it yourself and confirm in the app.
 - `docker exec` shells inside containers
+- Files tab: browse a server over SFTP, upload and download with drag and drop, and edit files in an editor tab
 - Read-only scan of each server: OS, memory, disks, failed services, containers and software versions
 - Servers ranked 1 to 5 by failed services, full disks, outdated software and overdue tasks, with the reasons shown
 - Tasks tied to servers
@@ -54,6 +55,10 @@ Ctrl+Shift+F searches the terminal.
 
 To bring in many servers at once, use Admin, Import. "Save a blank template" gives you the CSV columns; each row is
 shown as new, update or error before anything is saved, and a blank password keeps the stored one.
+
+The Files tab next to Analysis lists the server's folders. Upload with the button or by dragging files in, and
+download the selection. Double-click a file to edit it in a tab (Ctrl+S saves). If the file changed on the server
+since you opened it, sshdeck asks before overwriting. Files over 2 MB or that are not text are download-only.
 
 The passphrase lock is in Admin, Security. There is no recovery if the passphrase is lost.
 

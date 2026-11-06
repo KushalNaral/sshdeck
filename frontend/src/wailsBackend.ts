@@ -1,12 +1,45 @@
 import * as App from '../wailsjs/go/main/App'
 import { EventsOn } from '../wailsjs/runtime/runtime'
-import { ConnectError, type Backend } from './api'
-import type { Analysis, Link, Step } from './types'
+import { ConnectError, type Backend, type FilesApi } from './api'
+import type { Analysis, Link, Listing, Step, Transfer } from './types'
 
 const fromBase64 = (b64: string) => Uint8Array.from(atob(b64), (c) => c.charCodeAt(0))
 
 /** The real backend: every call goes to Go. Progress and terminal output arrive as events. */
+const msg = (e: unknown) => new Error(String(e instanceof Error ? e.message : e))
+/** Wraps a Go call so a rejection becomes an Error with the Go message. */
+const go = async <T>(p: Promise<T>): Promise<T> => {
+  try {
+    return await p
+  } catch (e) {
+    throw msg(e)
+  }
+}
+
+const files: FilesApi = {
+  list: (s, d) => go(App.ListDir(s, d)) as Promise<Listing>,
+  read: (s, p) => go(App.ReadText(s, p)),
+  write: (s, p, c, v) => go(App.WriteText(s, p, c, v)),
+  mkdir: (s, p) => go(App.Mkdir(s, p)),
+  newFile: (s, p) => go(App.NewFile(s, p)),
+  rename: (s, a, b) => go(App.Rename(s, a, b)),
+  remove: (s, p) => go(App.Delete(s, p)),
+  pickUpload: (s, d, f) => go(App.PickUpload(s, d, f)),
+  upload: (s, d, l, p) => go(App.Upload(s, d, l, p)),
+  pickDownload: (s, r) => go(App.PickDownload(s, r)),
+  download: (s, r, d, p) => go(App.Download(s, r, d, p)),
+  cancel: (id) => void App.CancelTransfer(id),
+  retry: (id) => void App.RetryTransfer(id),
+  clear: () => void App.ClearTransfers(),
+  onTransfers(cb) {
+    void App.Transfers().then((t) => cb((t ?? []) as Transfer[]))
+    return EventsOn('transfers', (t: Transfer[]) => cb(t ?? []))
+  },
+  onDrop: (cb) => EventsOn('files:dropped', cb),
+}
+
 export const wailsBackend: Backend = {
+  files,
   async connect(server, _vpn, onSteps) {
     const off = EventsOn(`connect:${server.id}`, (steps: Step[]) => onSteps(steps))
     try {

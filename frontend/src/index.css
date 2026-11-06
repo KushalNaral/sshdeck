@@ -1492,3 +1492,554 @@ tbody tr:hover td {
 .findbar input {
   width: 200px;
 }
+
+/* ---- Files side panel and editor: Explorer's details view, Windows 7 progress bars ---- */
+.side {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  min-height: 0;
+}
+
+.sidetabs {
+  display: flex;
+  gap: 2px;
+  padding: 3px 3px 0;
+  background: var(--cmd);
+  border: 1px solid var(--cmd-line);
+  border-bottom: 0;
+}
+
+.sidetabs button {
+  all: unset;
+  box-sizing: border-box;
+  cursor: pointer;
+  padding: 0 calc(var(--u) * 1.5);
+  height: calc(var(--u) * 3.25);
+  display: flex;
+  align-items: center;
+  color: var(--ink);
+  border: 1px solid transparent;
+  border-bottom: 0;
+  border-radius: 3px 3px 0 0;
+}
+
+.sidetabs button:hover {
+  background: var(--hov);
+  border-color: var(--hov-line);
+}
+
+.sidetabs button:focus-visible {
+  outline: 2px solid var(--glow);
+  outline-offset: -2px;
+}
+
+.sidetabs button[aria-selected='true'] {
+  background: var(--pane);
+  border-color: var(--pane-line);
+  font-weight: 600;
+  height: calc(var(--u) * 3.5);
+}
+
+.btn.icon {
+  min-width: calc(var(--u) * 3.25);
+  padding: 0;
+}
+
+.btn[aria-pressed='true'] {
+  background: var(--btn-down);
+  border-color: var(--btn-down-line);
+}
+
+.files {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  height: 100%;
+  background: var(--pane);
+  border: 1px solid var(--pane-line);
+  outline: none;
+}
+
+.files-bar {
+  display: flex;
+  gap: 3px;
+  padding: 5px;
+  background: var(--cmd);
+  border-bottom: 1px solid var(--cmd-line);
+}
+
+.addr {
+  flex: 1;
+  min-width: 0;
+}
+
+.addr input {
+  width: 100%;
+  height: calc(var(--u) * 3.25);
+  box-sizing: border-box;
+  padding: 0 6px;
+  font: inherit;
+  font-family: 'JetBrains Mono Variable', monospace;
+  font-size: var(--t-sm);
+  color: var(--ink);
+  background: var(--pane);
+  border: 1px solid var(--input-line);
+  border-radius: 2px;
+}
+
+.addr input:hover {
+  border-color: var(--input-hover);
+}
+
+.addr input:focus-visible {
+  outline: 1px solid var(--focus);
+  border-color: var(--focus);
+}
+
+/* The address bar's path as Explorer draws it: segments that light up under the pointer. */
+.crumbs {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  padding: 3px 5px;
+  border-bottom: 1px solid var(--line);
+  font-size: var(--t-sm);
+}
+
+.crumbs button {
+  all: unset;
+  cursor: pointer;
+  padding: 1px 5px;
+  border: 1px solid transparent;
+  border-radius: 2px;
+  color: var(--link);
+}
+
+.crumbs button:not(:first-child)::before {
+  content: '›';
+  margin-right: 5px;
+  color: var(--dim);
+}
+
+.crumbs button:hover {
+  background: var(--hov);
+  border-color: var(--hov-line);
+}
+
+.crumbs button[aria-current='page'] {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.crumbs button:focus-visible {
+  outline: 1px dotted var(--ink);
+}
+
+.files-cmd {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  padding: 4px 5px;
+  background: var(--cmd);
+  border-bottom: 1px solid var(--cmd-line);
+}
+
+.files-cmd .btn:not(.icon) {
+  min-width: 0;
+  padding: 0 10px;
+  gap: 5px;
+}
+
+.files-cmd .sep {
+  width: 1px;
+  align-self: stretch;
+  margin: 2px 3px;
+  background: var(--cmd-line);
+}
+
+.files-list {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  outline: none;
+}
+
+.files-list:focus-visible {
+  box-shadow: inset 0 0 0 1px var(--focus);
+}
+
+.files-head,
+.frow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 68px 96px;
+  align-items: center;
+  column-gap: 6px;
+  padding: 0 8px;
+}
+
+.files-head {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  height: 22px;
+  font-size: var(--t-sm);
+  color: var(--dim);
+  background: linear-gradient(#ffffff, #f1f5fb 48%, #e3eaf5 50%, #eef3fa);
+  border-bottom: 1px solid var(--line);
+}
+
+.files-head span:nth-child(2) {
+  text-align: right;
+}
+
+.frow {
+  height: 24px;
+  border: 1px solid transparent;
+  border-radius: var(--r);
+  margin: 0 2px;
+  cursor: default;
+  user-select: none;
+}
+
+.frow:hover {
+  background: var(--hov);
+  border-color: var(--hov-line);
+}
+
+.frow[aria-selected='true'] {
+  background: var(--sel);
+  border-color: var(--sel-line);
+}
+
+.fname {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.fname > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fname .ico {
+  flex: none;
+  color: var(--dim);
+}
+
+.fname .ico.dir {
+  color: #d9a21b;
+  fill: #f6d471;
+}
+
+.fname .lnk {
+  flex: none;
+  color: var(--dim);
+}
+
+.fnum,
+.fdate {
+  font-size: var(--t-sm);
+  color: var(--dim);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.fnum {
+  text-align: right;
+}
+
+.frow.editing {
+  background: var(--pane);
+  border-color: var(--input-hover);
+}
+
+.frow.editing input {
+  all: unset;
+  flex: 1;
+  min-width: 0;
+  box-sizing: border-box;
+  padding: 0 3px;
+  height: 18px;
+  background: var(--pane);
+  border: 1px solid var(--focus);
+  color: var(--ink);
+}
+
+.files-none,
+.files-empty {
+  padding: calc(var(--u) * 3);
+  color: var(--dim);
+  text-align: center;
+}
+
+.files-empty {
+  display: grid;
+  place-content: center;
+  gap: var(--u);
+  height: 100%;
+}
+
+.files-empty strong {
+  color: var(--ink);
+}
+
+.files-status {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--u);
+  padding: 2px 8px;
+  font-size: var(--t-sm);
+  color: var(--dim);
+  background: var(--cmd);
+  border-top: 1px solid var(--cmd-line);
+}
+
+.notice {
+  display: flex;
+  align-items: center;
+  gap: var(--u);
+  flex-wrap: wrap;
+  padding: 5px 8px;
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+}
+
+.notice > span:first-of-type {
+  flex: 1;
+  min-width: 0;
+}
+
+.notice.bad {
+  color: var(--bad);
+  background: color-mix(in srgb, var(--bad) 8%, var(--pane));
+}
+
+.notice.warn {
+  background: color-mix(in srgb, #f0d02a 22%, var(--pane));
+  color: var(--ink);
+}
+
+.notice .btn {
+  height: 22px;
+}
+
+.xfers {
+  max-height: 38%;
+  overflow: auto;
+  border-top: 1px solid var(--pane-line);
+}
+
+.xfers header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 3px 8px;
+  background: var(--cmd);
+  border-bottom: 1px solid var(--cmd-line);
+}
+
+.xfers .btn {
+  height: 22px;
+  min-width: 0;
+  padding: 0 8px;
+}
+
+.xfers ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.xfers li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 2px 8px;
+  padding: 5px 8px;
+  border-bottom: 1px solid var(--line);
+}
+
+.xname {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.xstate {
+  font-size: var(--t-sm);
+  color: var(--dim);
+  font-variant-numeric: tabular-nums;
+}
+
+.xfers progress {
+  grid-column: 1 / 3;
+  width: 100%;
+}
+
+.xact {
+  grid-column: 3;
+}
+
+.xerr {
+  grid-column: 1 / -1;
+  color: var(--bad);
+  font-size: var(--t-sm);
+}
+
+.xfers li[data-s='failed'] .xstate {
+  color: var(--bad);
+  font-weight: 600;
+}
+
+/* The Windows 7 progress bar: pale well, glossy green fill. */
+progress {
+  appearance: none;
+  height: 14px;
+  border: 1px solid #acacac;
+  border-radius: 2px;
+  background: linear-gradient(#e6e6e6, #f3f3f3);
+  overflow: hidden;
+}
+
+progress::-webkit-progress-bar {
+  background: transparent;
+}
+
+progress::-webkit-progress-value {
+  background: linear-gradient(#b5f0b0 0%, #6fd36a 48%, #2fb82b 50%, #5bd957 100%);
+  box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.5);
+  transition: width 0.18s ease-out;
+}
+
+.xfers li[data-s='failed'] progress::-webkit-progress-value {
+  background: linear-gradient(#f4b3ad, #e0594d 48%, #c4291c 50%, #dc4d40);
+}
+
+.xfers li[data-s='cancelled'] progress::-webkit-progress-value {
+  background: linear-gradient(#e4e4e4, #bdbdbd 48%, #a3a3a3 50%, #b8b8b8);
+}
+
+.dropveil {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: 6px;
+  text-align: center;
+  color: var(--head);
+  background: color-mix(in srgb, var(--pane) 82%, #3399ff);
+  outline: 2px dashed var(--glow);
+  outline-offset: -8px;
+  pointer-events: none;
+}
+
+.spin {
+  animation: spin 0.9s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* Editor tab */
+.tabs .dot {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  margin-left: 6px;
+  border-radius: 50%;
+  background: var(--glow);
+  box-shadow: 0 0 0 1px var(--pane-line);
+}
+
+.plate .editor {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
+  background: var(--pane);
+  color: var(--ink);
+}
+
+.editor[hidden] {
+  display: none;
+}
+
+.edbar {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  padding: 4px 5px;
+  background: var(--cmd);
+  border-bottom: 1px solid var(--cmd-line);
+}
+
+.edbar .btn {
+  min-width: 0;
+  padding: 0 10px;
+  gap: 5px;
+}
+
+.edpath {
+  margin-left: 8px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--dim);
+  font-family: 'JetBrains Mono Variable', monospace;
+  font-size: var(--t-sm);
+}
+
+.edhost {
+  position: relative;
+  min-height: 0;
+  grid-row: 3;
+}
+
+.editor > .empty {
+  position: absolute;
+  inset: 0;
+  top: 33px;
+  background: var(--pane);
+  color: var(--dim);
+}
+
+.editor > .empty strong {
+  color: var(--ink);
+}
+
+.edstatus {
+  display: flex;
+  gap: 16px;
+  padding: 2px 10px;
+  font-size: var(--t-sm);
+  color: var(--dim);
+  background: var(--cmd);
+  border-top: 1px solid var(--cmd-line);
+}
+
+.edstatus span:first-child {
+  flex: 1;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .spin {
+    animation: none;
+  }
+  progress::-webkit-progress-value {
+    transition: none;
+  }
+}
