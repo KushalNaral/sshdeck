@@ -53,6 +53,8 @@ process is in Go. The UI asks, Go acts, and Go pushes progress back as events.
 | `internal/probe` | Run read-only commands and parse them into a report | `Analyze`, `Report`, `Run` |
 | `internal/history` | Versions of edited files: sealed storage, pruning, and the shared copy on the server | `Store`, `Version`, `WriteRemote`, `ListRemote` |
 | `run.go`, `search.go`, `logs.go` | One command on several servers, search under a folder, followed logs | `RunOn`, `SearchFiles`, `StartLog` |
+| `push.go`, `actions.go` | One set of files copied to several servers through the transfer queue; restart, start, stop and status for a service or container | `PushTo`, `ServiceAction`, `ContainerAction` |
+| `observe.go`, `internal/metrics` | The sampler and scheduled rescan for connected servers, the readings store (memory plus one row a minute on disk), and the alert rules | `monitorLoop`, `metrics.Parser`, `metrics.Store`, `metrics.Engine` |
 | `tunnels.go`, `jump.go` | Saved port forwards on a connected server; logging in through jump hosts and picking the VPN for a chain | `StartTunnel`, `dialServer`, `vpnFor` |
 | `internal/importer` | Parse the CSV, an OpenSSH config, and the master `.ods` project list | `ParseCSV`, `ParseSSHConfig`, `ReadODS` |
 | `frontend/src` | The UI (see section 8) | `Backend` interface |
@@ -287,6 +289,71 @@ opens a tab and types `cd -- 'dir'` once the shell is attached. `StartLog` follo
 newline) as `log:<id>` events; `StopLog`, `Disconnect` or the connection ending closes it. The log tab keeps the last
 10,000 lines in the browser.
 
+### Copying files to several servers
+
+`PushTo` calls `Upload` for each connected server, so every copy is one ordinary entry in the transfer queue (three at a
+time, cancel and retry as usual). A server that is not connected comes back with an error and is never dialled. The
+"if it exists" choice is made once, up front (skip, replace or keep both); asking per server does not work across ten.
+Each result lists the names that were already there. The Run view shows the results and follows the transfers.
+
+### Service and container actions
+
+`ServiceAction` runs `systemctl status|start|stop|restart -- UNIT`; `ContainerAction` runs `docker start|stop|restart
+-- NAME`. Names are checked first (no leading `-`, a small character set) and quoted. The command runs in a subshell
+with stderr joined and its real exit code read back from a marker, the same trick Run uses. If the first try fails
+with a permission message it is repeated once with `sudo -n`. When that needs a password the user is told to use a
+terminal: sshdeck never types a password into a server. Changes are audited (`service.restart`, `container.stop`,
+...) and say whether sudo was used; `status` only reads and is not. The UI asks first for anything on a production
+server and for every stop.
+
+### Observing connected servers
+
+Everything here works on servers that are **already connected**. Nothing dials a server by itself, so no VPN comes up
+and no production login happens in the background.
+
+`monitorLoop` ticks every `SampleSeconds` (default 5). Each tick `sampleOnce` takes the connected servers (four at a
+time) and runs one read-only command, `metrics.Cmd`, which prints `/proc/stat`, `meminfo`, `loadavg`, `net/dev` and
+`diskstats` between marker lines, then `df -P`. `metrics.Parser` keeps the previous reading of each server and turns
+the counters into rates: CPU busy and steal, network in and out, disk read and write. A counter that went backwards
+(a reboot) gives a reading without rates, and the next one works again. The first reading after a connect has none.
+Loopback, Docker bridges and veth ends are left out of the network totals; only whole disks count for disk activity;
+a device bind-mounted many times counts once in disk space. A server that does not answer like Linux is marked and not
+asked again until it reconnects.
+
+`metrics.Store` keeps the last hour (720 readings) in memory per server and writes one averaged row per minute to
+`<config>/metrics/<serverId>.jsonl`, 0600. Rows older than seven days are dropped at startup and once a day, and a
+deleted server's file is removed with it. A range of an hour or less is read from memory; longer ranges come from the
+file, with the newest readings appended, and at most 600 points are returned. After a restart the last hour is rebuilt
+from the file at minute resolution. The files hold numbers keyed by server id: no host names, users or secrets. They
+are **not** sealed by the passphrase lock.
+
+A scheduled rescan (`scanDue`, every `ScanMinutes`, default 15) runs the same analysis as the Rescan button on each
+connected server and publishes it as an `analysis:<id>` event, which the UI merges into its state, so the triage level
+and the Analysis tab stay current without a click.
+
+`metrics.Engine` decides what deserves an alert. An alert is keyed by server, kind and subject, fires once when its
+condition has held long enough, and resolves once.
+
+| Kind | Fires when | Severity |
+|---|---|---|
+| disk | a mount is at or over the warning level (default 90%) | warning, critical at 95% |
+| memory | at or over 95% for 5 minutes | warning |
+| cpu | at or over 90% for 5 minutes | warning |
+| load | load1 over twice the core count for 5 minutes | warning |
+| service | a failed unit shows up in a scan | critical |
+| container | restarting, or stopped since the scan before | warning |
+| link | a dropped connection could not be brought back | critical |
+
+An alert stays until the value is three points under its line, so it does not flap. A disk that gets worse is
+announced again once. A disconnect closes the server's other alerts, because they can no longer be checked. New alerts
+are audited (`alert.fire`, `alert.resolve`), sent to the UI as an `alerts` event and shown as a desktop notification
+through Wails (turn it off in Admin, System). The levels and intervals are in `settings.json`; zero means the default.
+
+The Observe view is a fleet grid of cards (a short trend for CPU and memory, the worst disk, network, the firing
+alerts) and a detail page per server with charts for CPU, load, memory, network and disk activity over 15 minutes to
+7 days, the busiest processes (`TopProcesses`, asked for only while the page is open), services and containers with
+their actions, and the alert history. The charts are plain SVG in `components/Chart.tsx`.
+
 ### Two VPNs at once
 
 Two VPN clients usually fight over routes and DNS. Before connecting, the UI looks for another VPN that has a live or
@@ -423,23 +490,26 @@ React + TypeScript + Vite, Tailwind v4, xterm.js, Monaco, lucide-react. The desi
 its rules are in `PRODUCT.md` and `.impeccable/surfaces/frontend-src-app-tsx.md`.
 
 ```
-App.tsx              state: config, sessions, analysis; shortcuts; mode (Firefight / Tasks / Admin); lock state
+App.tsx              state: config, sessions, analysis; shortcuts; mode (Firefight / Tasks / Admin / Run / Observe); lock state
 api.ts               the Backend interface, ConnectError, and the demo mockBackend
 wailsBackend.ts      Backend implemented with the Wails bindings and events
 backend.ts           picks wailsBackend inside the window, mockBackend in a plain browser
 lib/config.ts        ConfigStore: Go store inside Wails, localStorage demo data otherwise
 components/          Rack, ConnectBar, Connection, TerminalPane/Term, FilesPanel, Editor, HistoryDrawer, HistoryPanel,
                      Splitter, Analysis, TasksBoard, Palette, Admin,
-                     SystemPanel, SecurityPanel, AuditPanel, LockScreen, Confirm
-lib/                 config, lock, audit, theme, version, status, files, monaco, layout, history
+                     SystemPanel, MonitorPanel, SecurityPanel, AuditPanel, LockScreen, Confirm,
+                     ObserveView, ObserveDetail, Chart, Actions
+lib/                 config, lock, audit, theme, version, status, files, monaco, layout, history, metrics, observe
 mockFiles.ts         demo file tree for the browser preview
+mockObserve.ts       made-up readings and alerts for the browser preview
 ```
 
 Because `Backend` is an interface, `npm run dev` runs the whole UI in a normal browser against fake data, which is
 how most visual work is done. Inside `wails dev` the same components talk to Go.
 
-Three jobs share one window: **Firefight** (connect and look), **Tasks** (what needs doing, with tags, servers and
-due dates), **Admin** (servers, VPN profiles, System, Security, Audit).
+Five jobs share one window: **Firefight** (connect and look), **Tasks** (what needs doing, with tags, servers and
+due dates), **Admin** (servers, VPN profiles, System, Security, Audit), **Run** (a command or files on several servers)
+and **Observe** (live numbers and alerts for the connected servers).
 
 ## 9. Testing
 
@@ -452,6 +522,8 @@ due dates), **Admin** (servers, VPN profiles, System, Security, Audit).
 | `store` | Temp directory plus an in-memory `Secrets` |
 | `App` | Fakes for `dial`, `lookPath`, the VPN manager, audit and events; covers steps, Hillstone, shared VPN, cancel, lock and idle, audit, shutdown, container commands, dependencies |
 | `run`, `search`, `logs` | Commands are run in a local shell through a fake client, so quoting, the exit marker, output cap, concurrency limit, cancel and line batching are exercised for real |
+| `metrics` | `/proc` fixtures give exact CPU, network and disk rates; counter resets, bind-mounted disks and non-Linux output; the store's ring, minute rows, pruning, restart and unsafe ids; the alert rules (windows, escalation, margins, scan diffing). One test runs the real command on the machine the tests run on |
+| `observe`, `push`, `actions` | A fake client answers the sampler and the scans: only connected servers are read, an alert fires and resolves once, notifications and settings, disconnect closes alerts, a deleted server loses its file; push policies; the exact `systemctl` and `docker` commands, hostile names, the `sudo -n` retry and the no-password rule |
 | `importer` | Parsing helpers; SSH config with wildcards, `Host *` defaults, quotes, ProxyJump |
 | Frontend | `vitest` for pure logic (`lib/version.ts`); the UI is checked by eye in the browser |
 
@@ -521,5 +593,8 @@ memory while in use.
 - Files: no resume for interrupted transfers, no permission editing, no symlink creation, and files over 2 MB
   cannot be edited in the app. The editor has no language servers.
 - Run: only servers that are already connected, and no per-server input. Search needs `find` and `grep` on the target. Logs need `journalctl` (and rights to read it) or `tail`.
+- Observe: only connected servers and only Linux servers with `/proc`. Minute rows keep averages, so a spike shorter than a minute is not visible in the 24 hour and 7 day charts. Readings stop while sshdeck is closed, so the week has gaps. Alert levels are the same for every server, and alerts only reach the desktop notification (no mail or chat). Container metrics are not collected.
+- Copying files: connected servers only, one "if it exists" choice for all, and no check that the folder exists on each server before the copy starts.
+- Service and container actions need rights on the server; if `sudo` asks for a password the action is refused and a terminal is the way.
 - Tunnels: no dynamic (SOCKS) forwards. SSH config import skips `Include` and `Match`, and takes only the first `IdentityFile` and the first `ProxyJump` hop.
 - Organisation mode (central inventory, OIDC, per-user access) is designed in [ORG-MODE.md](ORG-MODE.md), not built.

@@ -98,6 +98,7 @@ func (a *App) reconnect(ctx context.Context, serverID string, c *conn, vp *store
 	a.mu.Unlock()
 	if !on {
 		a.emit("link:"+serverID, Link{State: "lost", Problem: "The connection to " + name + " dropped.", Recovery: "Press Reconnect in the terminal, or connect again."})
+		a.linkAlert(serverID, true, "Connection to "+name+" lost")
 		return
 	}
 	for a.isLocked() { // the vault is locked, so the password is out of reach: wait for the unlock
@@ -137,6 +138,7 @@ func (a *App) reconnect(ctx context.Context, serverID string, c *conn, vp *store
 		cancel()
 		if err == nil {
 			a.emit("link:"+serverID, Link{State: "live"})
+			a.linkAlert(serverID, false, "")
 			a.audit("reconnect", name, "")
 			return
 		}
@@ -148,5 +150,6 @@ func (a *App) reconnect(ctx context.Context, serverID string, c *conn, vp *store
 		}
 	}
 	a.emit("link:"+serverID, Link{State: "lost", Problem: last.Problem, Recovery: last.Recovery})
+	a.linkAlert(serverID, true, "Connection to "+name+" lost: "+last.Problem)
 	a.audit("reconnect.fail", name, last.Problem)
 }

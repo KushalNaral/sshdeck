@@ -21,6 +21,15 @@ type Settings struct {
 	NoHistory   bool     `json:"noHistory,omitempty"`
 	// NoSharedHistory turns off the copy kept on the servers (stored inverted: the copy is on by default).
 	NoSharedHistory bool `json:"noSharedHistory,omitempty"`
+	// Monitoring (observe.go). Zero numbers mean the defaults; NoMonitor and NoNotify are stored inverted.
+	NoMonitor     bool `json:"noMonitor,omitempty"`
+	SampleSeconds int  `json:"sampleSeconds,omitempty"`
+	ScanMinutes   int  `json:"scanMinutes,omitempty"`
+	DiskWarn      int  `json:"diskWarn,omitempty"`
+	DiskCrit      int  `json:"diskCrit,omitempty"`
+	MemWarn       int  `json:"memWarn,omitempty"`
+	CPUWarn       int  `json:"cpuWarn,omitempty"`
+	NoNotify      bool `json:"noNotify,omitempty"`
 }
 
 func defaultSettings() Settings { return Settings{IdleMinutes: 15} }

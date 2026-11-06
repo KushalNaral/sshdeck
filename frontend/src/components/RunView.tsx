@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import type { Backend } from '../api'
+import type { Backend, PushPolicy } from '../api'
 import { messageOf } from '../lib/config'
 import { snippetsApi, useSnippets } from '../lib/snippets'
 import { viaLabel } from '../lib/status'
-import type { RunResult, Server, Session, Vpn } from '../types'
+import type { PushResult, RunResult, Server, Session, Transfer, Vpn } from '../types'
 import { Mark } from './Mark'
 
 interface Props {
@@ -36,6 +36,12 @@ export function RunView({ servers, vpns, sessions, backend, onConnect, ask }: Pr
   const [err, setErr] = useState<string | null>(null)
   const [naming, setNaming] = useState<string | null>(null)
   const [connecting, setConnecting] = useState(false)
+  const [what, setWhat] = useState<'command' | 'copy'>('command')
+  const [dir, setDir] = useState('')
+  const [policy, setPolicy] = useState<PushPolicy>('skip')
+  const [pushRes, setPushRes] = useState<PushResult[] | null>(null)
+  const [xfers, setXfers] = useState<Transfer[]>([])
+  useEffect(() => backend.files.onTransfers(setXfers), [backend])
   const off = useRef<() => void>(() => {})
   const { list: snippets, reload } = useSnippets()
   useEffect(() => () => off.current(), [])
@@ -73,6 +79,23 @@ export function RunView({ servers, vpns, sessions, backend, onConnect, ask }: Pr
       run: () => void start(),
     })
   }
+  const push = (folder: boolean) => {
+    const go = async () => {
+      setErr(null)
+      setPushRes(null)
+      try {
+        const r = await backend.run.push([...picked], dir.trim(), folder, policy)
+        if (r) setPushRes(r)
+      } catch (e) {
+        setErr(messageOf(e))
+      }
+    }
+    const prod = [...picked].filter((id) => live(id) && servers.find((s) => s.id === id)?.production).map((id) => servers.find((s) => s.id === id)!.name)
+    if (!prod.length) return void go()
+    ask({ title: 'Copy to production?', body: `Files will be copied into ${dir.trim()} on ${prod.join(', ')}.`, label: 'Copy to production', run: () => void go() })
+  }
+  const sent = xfers.filter((x) => x.up && picked.has(x.serverId))
+  const nameOf = (id: string) => servers.find((s) => s.id === id)?.name ?? id
   const connectPicked = async () => {
     setConnecting(true)
     for (const id of idle) await onConnect(id) // one at a time: a VPN asks for approval
@@ -124,6 +147,55 @@ export function RunView({ servers, vpns, sessions, backend, onConnect, ask }: Pr
       </section>
 
       <section className="run-main" aria-label="Command">
+        <div className="orange" role="group" aria-label="What to do">
+          <button className="btn" aria-pressed={what === 'command'} onClick={() => setWhat('command')}>Run a command</button>
+          <button className="btn" aria-pressed={what === 'copy'} onClick={() => setWhat('copy')}>Copy files</button>
+        </div>
+        {what === 'copy' ? (
+          <>
+            <h3 className="label">Copy to the picked servers</h3>
+            <label className="run-dir">
+              <span>Folder on the servers</span>
+              <input aria-label="Folder on the servers" spellCheck={false} placeholder="/var/www/app/config" value={dir} onChange={(e) => setDir(e.target.value)} />
+            </label>
+            <label className="run-dir">
+              <span>If a file is already there</span>
+              <select aria-label="If a file is already there" value={policy} onChange={(e) => setPolicy(e.target.value as PushPolicy)}>
+                <option value="skip">Leave it alone</option>
+                <option value="replace">Replace it</option>
+                <option value="keep">Keep both</option>
+              </select>
+            </label>
+            <div className="actions">
+              <button className="btn solid" disabled={!dir.trim() || !picked.size} onClick={() => push(false)}>Files…</button>
+              <button className="btn solid" disabled={!dir.trim() || !picked.size} onClick={() => push(true)}>Folder…</button>
+              <span className="dim">Only connected servers get the files; the rest are skipped.</span>
+            </div>
+            {err && <p className="bad" role="alert">{err}</p>}
+            {pushRes && (
+              <ul className="push-res" aria-live="polite">
+                {pushRes.map((r) => (
+                  <li key={r.server} className={r.error ? 'bad' : ''}>
+                    <strong>{r.name}</strong>{' '}
+                    {r.error ? r.error : r.started ? `Copying ${r.started} item${r.started === 1 ? '' : 's'}.` : 'Nothing copied.'}
+                    {r.conflicts?.length ? ` Already there: ${r.conflicts.join(', ')}.` : ''}
+                  </li>
+                ))}
+              </ul>
+            )}
+            {sent.length > 0 && (
+              <ul className="push-res" aria-label="Copy progress">
+                {sent.map((x) => (
+                  <li key={x.id} className={x.state === 'failed' ? 'bad' : ''}>
+                    <strong>{nameOf(x.serverId)}</strong> {x.name}{' '}
+                    <span className="dim">{x.state === 'running' && x.total > 0 ? `${Math.round((x.done / x.total) * 100)}%` : x.state}{x.error ? `: ${x.error}` : ''}</span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </>
+        ) : (
+          <>
         <h3 className="label">Command</h3>
         <div className="run-bar">
           <select aria-label="Saved snippets" value="" onChange={(e) => e.target.value && setCmd(snippets.find((x) => x.id === e.target.value)?.command ?? '')}>
@@ -174,6 +246,8 @@ export function RunView({ servers, vpns, sessions, backend, onConnect, ask }: Pr
             )
           })}
         </div>
+          </>
+        )}
       </section>
     </div>
   )

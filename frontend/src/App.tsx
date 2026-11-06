@@ -7,6 +7,8 @@ import { Confirm } from './components/Confirm'
 import { Connection } from './components/Connection'
 import { Tunnels } from './components/Tunnels'
 import { RunView } from './components/RunView'
+import { ObserveView } from './components/ObserveView'
+import { useAlerts } from './lib/observe'
 import { Mark } from './components/Mark'
 import { Analysis } from './components/Analysis'
 import { Logins } from './components/Logins'
@@ -290,6 +292,15 @@ export default function App() {
     setScanning((cur) => (cur === id ? null : cur))
   }, [])
 
+  const alerts = useAlerts(backend)
+  const firingCount = alerts.filter((a) => !a.resolved).length
+  // A scheduled rescan arrives as an event; it updates the same analysis the Rescan button does.
+  const serverIds = config.servers.map((s) => s.id).join(',')
+  useEffect(() => {
+    const offs = serverIds.split(',').filter(Boolean).map((id) => backend.observe.onAnalysis(id, (a) => setAnalysis((p) => ({ ...p, [id]: a }))))
+    return () => offs.forEach((off) => off())
+  }, [serverIds])
+
   // Scan on its own only for a server with an open shell: a scan logs in, and the others may be behind a VPN that is down.
   const live = sessions[selected]?.state === 'live'
   useEffect(() => {
@@ -384,6 +395,7 @@ export default function App() {
       else if (e.key === '2') act(() => setMode('tasks'))
       else if (e.key === '3') act(() => setMode('admin'))
       else if (e.key === '4') act(() => setMode('run'))
+      else if (e.key === '5') act(() => setMode('observe'))
     }
     // Capture phase: xterm stops key events before they bubble, so shortcuts must be caught first.
     window.addEventListener('keydown', onKey, true)
@@ -424,6 +436,11 @@ export default function App() {
             <Mark kind={mode === 'run' ? 'filled' : 'hollow'} />
             <span>D · Run</span>
           </button>
+          <button aria-pressed={mode === 'observe'} onClick={() => setMode('observe')}>
+            <Mark kind={mode === 'observe' ? 'filled' : 'hollow'} />
+            <span>E · Observe</span>
+            {firingCount > 0 && <span className="badge" aria-label={`${firingCount} alerts firing`}>{firingCount}</span>}
+          </button>
         </div>
         <div className="hints">
           <span>
@@ -433,7 +450,7 @@ export default function App() {
             <kbd>Ctrl T</kbd> New shell
           </span>
           <span>
-            <kbd>Ctrl 1</kbd> <kbd>2</kbd> <kbd>3</kbd> <kbd>4</kbd> Job
+            <kbd>Ctrl 1</kbd> <kbd>2</kbd> <kbd>3</kbd> <kbd>4</kbd> <kbd>5</kbd> Job
           </span>
         </div>
         <div className="viewbtns" role="group" aria-label="Layout">
@@ -525,7 +542,7 @@ export default function App() {
           ) : side === 'files' ? (
             <FilesPanel serverId={selected} serverName={server.name} live={live} backend={backend} onEdit={(t, p, line) => openDoc(selected, p, false, t, line)} onTail={(t, p) => openLog(selected, 'file', p, t)} onTerminal={(ctr, dir) => (ctr ? requestExec(selected, { container: ctr, user: '', sudo: false, cwd: dir }) : addTab(selected, undefined, dir))} onHistory={(t, p) => openDoc(selected, p, true, t)} layout={layout} onLayout={setLayout} />
           ) : (
-            <Analysis server={server} triage={levels[server.id]} data={analysis[selected]} scanning={scanning === selected} error={scanErrors[selected]} connected={live} onExec={(c) => requestExec(selected, c)} onLog={(kind, arg) => openLog(selected, kind, arg)} onRescan={() => void scan(selected)} onTrack={(n, v) => trackSoftware(selected, n, v)} onCopySsh={() => attempt(() => configStore.copySSH(selected))} connection={<><Connection server={server} vpns={vpns} session={sess} /><Tunnels server={server} live={live} backend={backend} /></>} logins={<Logins server={server} onCopy={(l, f) => attempt(() => configStore.copyLogin(selected, l.id, f))} />} />
+            <Analysis backend={backend} ask={(a) => setAsk(a)} server={server} triage={levels[server.id]} data={analysis[selected]} scanning={scanning === selected} error={scanErrors[selected]} connected={live} onExec={(c) => requestExec(selected, c)} onLog={(kind, arg) => openLog(selected, kind, arg)} onRescan={() => void scan(selected)} onTrack={(n, v) => trackSoftware(selected, n, v)} onCopySsh={() => attempt(() => configStore.copySSH(selected))} connection={<><Connection server={server} vpns={vpns} session={sess} /><Tunnels server={server} live={live} backend={backend} /></>} logins={<Logins server={server} onCopy={(l, f) => attempt(() => configStore.copyLogin(selected, l.id, f))} />} />
           )}
         </div>
         )}
@@ -550,6 +567,25 @@ export default function App() {
       {mode === 'run' && (
         <main className="stage">
           <RunView servers={servers} vpns={vpns} sessions={sessions} backend={backend} onConnect={(id) => (sessionsRef.current[id] ? Promise.resolve() : requestConnect(id))} ask={(a) => setAsk(a)} />
+        </main>
+      )}
+
+      {mode === 'observe' && (
+        <main className="stage">
+          <ObserveView
+            servers={servers}
+            vpns={vpns}
+            sessions={sessions}
+            levels={levels}
+            analysis={analysis}
+            alerts={alerts}
+            backend={backend}
+            ask={(a) => setAsk(a)}
+            onConnect={(id) => (sessionsRef.current[id] ? Promise.resolve() : requestConnect(id))}
+            onTerminal={(id) => (setSelected(id), setMode('firefight'))}
+            onLog={(id, kind, arg) => (setSelected(id), setMode('firefight'), openLog(id, kind, arg))}
+            onRescan={(id) => void scan(id)}
+          />
         </main>
       )}
 

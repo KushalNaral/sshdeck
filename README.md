@@ -14,7 +14,10 @@ needs doing.
 - Files: browse over SFTP, drag and drop transfers, an editor, search, and a history of every save you can restore
 - The same for running Docker containers, plus `docker exec` shells
 - Tunnels (port forwards), jump hosts, and import from CSV or `~/.ssh/config`
-- Run one command on several servers, saved snippets, and followed logs
+- Run one command on several servers, copy files to several, saved snippets, and followed logs
+- Restart, start or stop a failed service or a container from the analysis
+- Observe: live CPU, memory, disk and network for every connected server, a week of history, and alerts when a disk
+  fills or a service fails
 - A read-only scan of each server, with servers ranked 1 to 5 by what needs doing, and tasks tied to servers
 - Reconnects when an SSH link or VPN tunnel drops
 - Passwords in the OS keyring, or in an encrypted vault behind a passphrase; an audit log of what was done
@@ -50,7 +53,7 @@ sshdeck checks GitHub for a newer release when it starts and shows an Update but
 2. Admin, Servers: add a server with its host, user and password or key, and pick its VPN.
 3. Firefight: select the server and press Connect.
 
-Ctrl+K finds a server, Ctrl+T opens a shell tab, Ctrl+1/2/3/4 switch between Firefight, Tasks, Admin and Run, and
+Ctrl+K finds a server, Ctrl+T opens a shell tab, Ctrl+1 to Ctrl+5 switch between Firefight, Tasks, Admin, Run and Observe, and
 Ctrl+Shift+F searches the terminal.
 
 ### Import
@@ -111,6 +114,38 @@ Save commands you use often in Admin, Snippets, or with "Save as snippet" in the
 Snippets menu that types a snippet without running it.
 
 ![Running df on four servers, one of which failed](docs/screenshots/run.jpg)
+
+To put the same files on several servers, switch the Run view to "Copy files". Pick the servers, type the folder on
+the servers, say what to do when a file is already there (leave it, replace it, or keep both), then press Files… or
+Folder…. Each server answers with what it started and what it left alone, and the copies show their progress. As with
+a command, servers that are not connected are skipped and production servers ask first.
+
+![Copying a config file to four servers](docs/screenshots/push.jpg)
+
+### Services and containers
+
+In the Analysis tab, a failed service has Log, Status and Restart buttons, and each container has Start or Stop and
+Restart. Anything on a production server, and every stop, asks first. If the login is not allowed to do it, sshdeck
+tries once more with `sudo -n`; when sudo wants a password it says so and you use a terminal instead. sshdeck never
+types a password into a server.
+
+### Observe
+
+Ctrl+5 shows every server as a card: CPU, memory, the fullest disk and network traffic, with a short trend. Servers
+that are connected come first, sorted by how much they need you; the rest have a Connect button. sshdeck only reads
+servers you are already connected to, so nothing is read in the background from the others. Open a card for the
+details: charts for CPU, load, memory, network and disk activity over 15 minutes to 7 days, the busiest processes,
+failed services and containers with their buttons, and the alerts for that server.
+
+![All servers at a glance, with three alerts firing](docs/screenshots/observe.jpg)
+
+![One server in detail](docs/screenshots/observe-detail.jpg)
+
+An alert appears when a disk is over 90%, memory or CPU stay over their line for five minutes, the load is more than
+twice the number of cores, a service fails, a container restarts or stops, or a connection drops and cannot be
+brought back. It shows on the Observe tab, in the audit log, and as a desktop notification. Admin, System has the
+intervals and the levels, and a switch to turn it all off. Readings are kept for 7 days, as numbers only, in the data
+folder.
 
 ### Logs
 

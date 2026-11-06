@@ -150,7 +150,8 @@ type fakeClient struct {
 	runs   []string
 	ftp    *sftp.Client
 	exec   func(ctx context.Context, cmd string, stdin io.Reader, stdout io.Writer) error
-	dialed []string // addresses reached through Dial
+	runf   func(cmd string) (string, error) // answers Run when set
+	dialed []string                         // addresses reached through Dial
 }
 
 func (f *fakeClient) dials() []string {
@@ -194,6 +195,9 @@ func (f *fakeClient) Run(_ context.Context, cmd string) (string, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.runs = append(f.runs, cmd)
+	if f.runf != nil {
+		return f.runf(cmd)
+	}
 	return "", nil
 }
 func (f *fakeClient) Done() <-chan struct{} { return f.done }

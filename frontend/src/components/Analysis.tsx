@@ -2,7 +2,9 @@ import { Copy, RefreshCw } from 'lucide-react'
 import { useState, type ReactNode } from 'react'
 import { versionGap } from '../lib/version'
 import { LEVEL_NAME, type Triage } from '../lib/triage'
+import type { Backend } from '../api'
 import type { Analysis as A, ContainerTab, Server } from '../types'
+import { ContainerActions, ServiceRow, type Ask } from './Actions'
 import { Mark } from './Mark'
 import { Tag } from './Tag'
 
@@ -36,10 +38,13 @@ interface Props {
   onCopySsh: () => Promise<string | null>
   connection?: ReactNode
   logins?: ReactNode
+  backend: Backend
+  /** The confirm dialog, for restarts and stops. */
+  ask: Ask
 }
 
 /** Read-only picture of the box, laid out like departure columns. */
-export function Analysis({ server, triage, data, scanning, error, connected, onRescan, onExec, onLog, onTrack, onCopySsh, connection, logins }: Props) {
+export function Analysis({ server, triage, data, scanning, error, connected, onRescan, onExec, onLog, onTrack, onCopySsh, connection, logins, backend, ask }: Props) {
   const [runAs, setRunAs] = useState<'default' | 'root' | 'other'>('root')
   const [other, setOther] = useState('')
   const [sudo, setSudo] = useState(false)
@@ -169,12 +174,7 @@ export function Analysis({ server, triage, data, scanning, error, connected, onR
                 <Mark kind="confirmed" /> None failed
               </span>
             ) : (
-              data.failedUnits.map((u) => (
-                <div key={u} className="bad" style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                  <Mark kind="struck" /> {u}
-                  <button className="btn" disabled={!connected} onClick={() => onLog('journal', u)} title={connected ? `Follow the log of ${u}` : 'Connect to the server first'}>Log</button>
-                </div>
-              ))
+              data.failedUnits.map((u) => <ServiceRow key={u} unit={u} server={server} connected={connected} backend={backend} ask={ask} onDone={onRescan} onLog={() => onLog('journal', u)} />)
             )}
           </div>
 
@@ -231,7 +231,8 @@ export function Analysis({ server, triage, data, scanning, error, connected, onR
                         </button>{' '}
                         <button className="btn" disabled={!connected} onClick={() => onLog('container', c.name)} title={connected ? `Follow the output of ${c.name}` : 'Connect to the server first'}>
                           Log
-                        </button>
+                        </button>{' '}
+                        <ContainerActions c={c} server={server} connected={connected} backend={backend} ask={ask} onDone={onRescan} />
                       </td>
                     </tr>
                   ))}

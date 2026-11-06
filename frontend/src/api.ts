@@ -1,5 +1,6 @@
-import type { Analysis, Dep, Link, HistorySettings, Listing, Policy, Server, StartResult, Step, TextFile, RunResult, SearchHit, Transfer, TunnelState, Version, Vpn } from './types'
+import type { ActionResult, Alert, Analysis, Dep, Link, MonitorSettings, Proc, PushResult, Sample, HistorySettings, Listing, Policy, Server, StartResult, Step, TextFile, RunResult, SearchHit, Transfer, TunnelState, Version, Vpn } from './types'
 import { mockFiles, mockHistory } from './mockFiles'
+import { mockActions, mockObserve } from './mockObserve'
 
 /** Everything the UI needs from the Go side. The Wails bindings will implement this same shape. */
 /** Files on the server (SFTP) and the transfer queue. Every call needs a live connection. */
@@ -60,9 +61,37 @@ export interface RunApi {
   /** Runs on the servers that are connected; the others come back as skipped. Resolves with the run id. */
   start(serverIds: string[], command: string): Promise<string>
   cancel(runId: string): void
+  /** Asks for files (or a folder) on this machine and copies them into remoteDir on each connected server. Resolves with nothing when the dialog is cancelled. */
+  push(serverIds: string[], remoteDir: string, folder: boolean, policy: PushPolicy): Promise<PushResult[] | null>
   /** Current results, for catching up after the first events. */
   results(runId: string): Promise<RunResult[]>
   onResult(runId: string, cb: (r: RunResult) => void): () => void
+}
+
+export type PushPolicy = 'skip' | 'replace' | 'keep'
+
+export interface ObserveApi {
+  /** The newest reading of every server that has one, by server id. */
+  latest(): Promise<Record<string, Sample>>
+  /** Readings between two unix times, at most 600. The last hour is full resolution, older times are per minute. */
+  range(serverId: string, from: number, to: number): Promise<Sample[]>
+  onSamples(cb: (m: Record<string, Sample>) => void): () => void
+  /** Firing alerts first, then recently resolved ones. */
+  alerts(): Promise<Alert[]>
+  onAlerts(cb: (a: Alert[]) => void): () => void
+  /** The report of a scheduled rescan. */
+  onAnalysis(serverId: string, cb: (a: Analysis) => void): () => void
+  top(serverId: string): Promise<Proc[]>
+  settings(): Promise<MonitorSettings>
+  saveSettings(s: MonitorSettings): Promise<void>
+}
+
+export type ServiceAct = 'status' | 'start' | 'stop' | 'restart'
+
+export interface ActionsApi {
+  /** Rejects with a readable message, for example when sudo needs a password. */
+  service(serverId: string, unit: string, action: ServiceAct): Promise<ActionResult>
+  container(serverId: string, name: string, action: Exclude<ServiceAct, 'status'>): Promise<ActionResult>
 }
 
 export type LogKind = 'journal' | 'file' | 'container'
@@ -81,6 +110,8 @@ export interface Backend {
   logs: LogsApi
   tunnels: TunnelsApi
   run: RunApi
+  observe: ObserveApi
+  actions: ActionsApi
   history: HistoryApi
   connect(server: Server, vpn: Vpn | undefined, onSteps: (steps: Step[]) => void): Promise<void>
   confirmManualVpn(serverId: string): void
@@ -195,6 +226,14 @@ const mockRun: RunApi = (() => {
       return id
     },
     cancel: () => {},
+    async push(ids) {
+      await sleep(400)
+      return ids.map((sid, i): PushResult => {
+        const name = demoServers.get(sid)?.name ?? sid
+        if (!demoServers.has(sid)) return { server: sid, name, started: 0, error: 'Not connected. Connect to this server first.' }
+        return i === 1 ? { server: sid, name, started: 1, conflicts: ['app.conf'] } : { server: sid, name, started: 2 }
+      })
+    },
     results: async (id) => [...(last.get(id)?.values() ?? [])],
     onResult(id, cb) {
       subs.set(id, (subs.get(id) ?? new Set()).add(cb))
@@ -236,6 +275,8 @@ export const mockBackend: Backend = {
   logs: mockLogs,
   tunnels: mockTunnels,
   run: mockRun,
+  observe: mockObserve(() => [...demoServers.keys()]),
+  actions: mockActions,
   history: mockHistory,
   async connect(server, vpn, onSteps) {
     demoServers.set(server.id, server)

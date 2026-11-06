@@ -403,6 +403,7 @@ func (a *App) Disconnect(serverID string) {
 	}
 	a.stopTunnels(serverID)
 	a.stopLogs(serverID)
+	a.forgetMonitor(serverID)
 	if c.stop != nil {
 		c.stop()
 	}
@@ -533,17 +534,22 @@ func (a *App) Analyze(serverID string) (probe.Report, error) {
 		}
 		defer cl.Close()
 	}
+	return a.analyzeClient(ctx, sv.Name, cl)
+}
+
+// analyzeClient runs the probe over an open client. The scheduled rescan uses it too.
+func (a *App) analyzeClient(ctx context.Context, name string, cl sshx.Client) (probe.Report, error) {
 	run := func(cmd string) (string, error) {
 		c, cancel := context.WithTimeout(ctx, 20*time.Second)
 		defer cancel()
 		return cl.Run(c, cmd)
 	}
 	if _, err := run("true"); err != nil { // one quick check first, so an unreachable server fails once, not eleven times
-		return probe.Report{}, fmt.Errorf("%s is not reachable: %w", sv.Name, err)
+		return probe.Report{}, fmt.Errorf("%s is not reachable: %w", name, err)
 	}
 	r, err := probe.Analyze(ctx, run)
 	if err != nil {
-		return r, fmt.Errorf("%s could not be analysed: %w", sv.Name, err)
+		return r, fmt.Errorf("%s could not be analysed: %w", name, err)
 	}
 	return r, nil
 }

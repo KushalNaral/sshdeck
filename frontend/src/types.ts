@@ -164,7 +164,7 @@ export interface Session {
   link?: Link
 }
 
-export type Mode = 'firefight' | 'tasks' | 'run' | 'admin'
+export type Mode = 'firefight' | 'tasks' | 'run' | 'observe' | 'admin'
 
 export type TaskStatus = 'todo' | 'doing' | 'done'
 
@@ -276,4 +276,70 @@ export interface SearchHit {
   /** Content search only: the matching line. */
   line?: number
   text?: string
+}
+
+/** One reading of a server. Rates (cpu, steal, net*, disk*) are only meaningful when hasRates is true. */
+export interface Sample {
+  t: number
+  hasRates: boolean
+  cpu: number
+  steal: number
+  load1: number
+  load5: number
+  load15: number
+  cores: number
+  memPct: number
+  memUsedMb: number
+  memTotalMb: number
+  swapPct: number
+  netRx: number
+  netTx: number
+  diskR: number
+  diskW: number
+  disks: { mount: string; usedPct: number }[]
+}
+
+export interface Alert {
+  id: string
+  server: string
+  kind: 'disk' | 'memory' | 'cpu' | 'load' | 'service' | 'container' | 'link'
+  subject: string
+  severity: 'warning' | 'critical'
+  text: string
+  since: number
+  /** Unix seconds; absent while the alert is still firing. */
+  resolved?: number
+}
+
+export interface Proc {
+  pid: number
+  user: string
+  cpu: number
+  mem: number
+  command: string
+}
+
+export interface MonitorSettings {
+  off: boolean
+  sampleSeconds: number
+  scanMinutes: number
+  diskWarn: number
+  diskCrit: number
+  memWarn: number
+  cpuWarn: number
+  noNotify: boolean
+}
+
+export interface PushResult {
+  server: string
+  name: string
+  started: number
+  conflicts?: string[]
+  error?: string
+}
+
+export interface ActionResult {
+  output: string
+  exit: number
+  sudo?: boolean
 }

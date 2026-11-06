@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/user"
 	"path/filepath"
+	"strconv"
 	"sync"
 	"time"
 
@@ -16,6 +17,7 @@ import (
 
 	"github.com/KushalNaral/sshdeck/internal/audit"
 	"github.com/KushalNaral/sshdeck/internal/history"
+	"github.com/KushalNaral/sshdeck/internal/metrics"
 	"github.com/KushalNaral/sshdeck/internal/sshx"
 	"github.com/KushalNaral/sshdeck/internal/store"
 	"github.com/KushalNaral/sshdeck/internal/update"
@@ -40,6 +42,14 @@ type App struct {
 
 	// Seams so tests can run without a window or a network.
 	emit func(name string, data ...any)
+
+	// Monitoring (observe.go): readings kept for the Observe view, the alert rules, and the desktop popup.
+	ms     *metrics.Store
+	eng    *metrics.Engine
+	mon    *monitor
+	notify func(title, body string)
+	// notifyDone releases the desktop notification service; set by startup only when it started one.
+	notifyDone func()
 
 	// File history (history.go). histDir empty means no history.
 	histDir string
@@ -112,6 +122,8 @@ func NewApp() (*App, error) {
 	a.histDir = filepath.Join(base, "history")
 	a.vaultPath, a.settingsPath, a.plainPath = filepath.Join(base, "vault.enc"), filepath.Join(base, "settings.json"), filepath.Join(base, "data.json")
 	a.settings = loadSettings(a.settingsPath)
+	a.ms = metrics.New(filepath.Join(base, "metrics"))
+	a.applyThresholds()
 	actor := "unknown"
 	if u, err := user.Current(); err == nil {
 		actor = u.Username
@@ -138,6 +150,7 @@ func newApp(st *store.Store, m vpn.Manager, dial func(context.Context, store.Ser
 		clipSet: func(string) error { return nil }, clipGet: func() (string, error) { return "", nil }, clipTTL: clipboardTTL,
 		secrets: store.Keyring{}, clock: time.Now, vpnPoll: 5 * time.Second, backoff: []time.Duration{2 * time.Second, 4 * time.Second, 8 * time.Second, 16 * time.Second, 30 * time.Second}, settings: defaultSettings(), lastActive: time.Now(),
 		conns: map[string]*conn{}, tuns: map[string]*tunnelRun{}, runs: map[string]*runState{}, logs: map[string]logRun{}, cancels: map[string]func(){}, manual: map[string]chan struct{}{}, version: version, dialThrough: sshx.DialThrough,
+		ms: metrics.New(""), eng: metrics.NewEngine(metrics.Defaults()), mon: newMonitor(),
 		probe: probeTCP, routeWait: 30 * time.Second, routePoll: 700 * time.Millisecond,
 	}
 	a.updCheck = func(ctx context.Context) (update.Info, error) { return a.updater().Check(ctx) }
@@ -162,12 +175,23 @@ func (a *App) startup(ctx context.Context) {
 	})
 	a.audit("app.start", "", "")
 	go a.idleLoop(ctx)
+	if runtime.IsNotificationAvailable(ctx) && runtime.InitializeNotifications(ctx) == nil {
+		a.notify = func(title, body string) {
+			_ = runtime.SendNotification(ctx, runtime.NotificationOptions{ID: strconv.FormatInt(time.Now().UnixNano(), 36), Title: title, Body: body})
+		}
+		a.notifyDone = func() { runtime.CleanupNotifications(ctx) }
+	}
+	go a.monitorLoop(ctx)
 }
 
 // shutdown closes every shell and stops every VPN this app started.
 func (a *App) shutdown(context.Context) {
 	a.audit("app.stop", "", "")
 	a.disconnectAll()
+	a.ms.Flush()
+	if a.notifyDone != nil {
+		a.notifyDone()
+	}
 	if c, ok := a.starter.(io.Closer); ok {
 		_ = c.Close()
 	}
@@ -200,6 +224,7 @@ func (a *App) DeleteServer(id string) error {
 	a.Disconnect(id)
 	err := a.st.DeleteServer(id)
 	if err == nil {
+		a.ms.Delete(id)
 		a.audit("server.delete", name, "")
 	}
 	return err

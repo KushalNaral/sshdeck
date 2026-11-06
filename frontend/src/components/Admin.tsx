@@ -11,6 +11,7 @@ import { LoginsEditor } from './LoginsEditor'
 import { ReconnectSetting, SecurityPanel } from './SecurityPanel'
 import { SystemPanel } from './SystemPanel'
 import { UpdatePanel } from './UpdatePanel'
+import { MonitorPanel } from './MonitorPanel'
 import type { LockState } from '../lib/lock'
 import { Mark } from './Mark'
 
@@ -313,6 +314,7 @@ export function Admin({ servers, vpns, lock, onLockChange, onSaveServer, onDelet
       {tab === 'system' && (
         <>
           <UpdatePanel />
+          <MonitorPanel />
           <SystemPanel />
         </>
       )}
