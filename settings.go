@@ -14,6 +14,13 @@ type Settings struct {
 	NoReconnect bool `json:"noAutoReconnect,omitempty"`
 	// NoUpdateCheck turns off the look for a newer release at startup. Stored inverted, like NoReconnect.
 	NoUpdateCheck bool `json:"noUpdateCheck,omitempty"`
+	// File history (history.go). Zero Keep and Days mean the defaults; NoHistory is stored inverted too.
+	HistoryKeep int      `json:"historyKeep,omitempty"`
+	HistoryDays int      `json:"historyDays,omitempty"`
+	HistoryDeny []string `json:"historyDeny,omitempty"` // file name patterns never recorded, besides the built-in list
+	NoHistory   bool     `json:"noHistory,omitempty"`
+	// NoSharedHistory turns off the copy kept on the servers (stored inverted: the copy is on by default).
+	NoSharedHistory bool `json:"noSharedHistory,omitempty"`
 }
 
 func defaultSettings() Settings { return Settings{IdleMinutes: 15} }

@@ -4,6 +4,7 @@ package store
 
 import (
 	"crypto/rand"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -43,6 +44,9 @@ type Server struct {
 	Software    []Software `json:"software,omitempty"` // what is tracked on this server, with the version it should reach
 	Projects    []string   `json:"projects,omitempty"`
 	Note        string     `json:"note,omitempty"`
+	// HistoryCopy says whether edited files' history is also kept on the server: "on", "off", or empty for the
+	// default (on, except on production servers). Changed only through SetHistoryCopy.
+	HistoryCopy string `json:"historyCopy,omitempty"`
 }
 
 // Login is another credential that belongs to a server, such as its database or cPanel. The secret is kept like a
@@ -394,9 +398,10 @@ func (s *Store) SaveServer(sv Server, password string) (Server, error) {
 	}
 	if i := s.serverIndex(sv.ID); i >= 0 {
 		sv.Logins = s.d.Servers[i].Logins // logins change only through SaveLogin and DeleteLogin
+		sv.HistoryCopy = s.d.Servers[i].HistoryCopy
 		s.d.Servers[i] = sv
 	} else {
-		sv.Logins = nil
+		sv.Logins, sv.HistoryCopy = nil, ""
 		s.d.Servers = append(s.d.Servers, sv)
 	}
 	return sv, s.flush()
@@ -688,4 +693,47 @@ func writeAtomic(path string, b []byte) error {
 		return err
 	}
 	return os.Rename(tmp.Name(), path)
+}
+
+// HistoryKey returns the key that seals file history, creating it on first use. It is kept like a password (in the
+// OS keyring, or inside the vault), so it moves with them when the passphrase lock is turned on or off.
+func (s *Store) HistoryKey() ([]byte, error) {
+	if v, err := s.Password("history", "key"); err == nil {
+		if b, err := base64.StdEncoding.DecodeString(v); err == nil && len(b) == 32 {
+			return b, nil
+		}
+	} else if !errors.Is(err, ErrNotFound) {
+		return nil, err
+	}
+	b := make([]byte, 32)
+	if _, err := rand.Read(b); err != nil {
+		return nil, err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.locked {
+		return nil, ErrLocked
+	}
+	if err := s.setSecret("history/key", base64.StdEncoding.EncodeToString(b)); err != nil {
+		return nil, fmt.Errorf("store the history key: %w", err)
+	}
+	return b, s.flush()
+}
+
+// SetHistoryCopy sets whether a server also keeps file history on the server itself ("on", "off" or "" for the default).
+func (s *Store) SetHistoryCopy(id, v string) error {
+	if v != "" && v != "on" && v != "off" {
+		return invalid("history copy must be on, off or empty")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.locked {
+		return ErrLocked
+	}
+	i := s.serverIndex(id)
+	if i < 0 {
+		return ErrNotFound
+	}
+	s.d.Servers[i].HistoryCopy = v
+	return s.flush()
 }

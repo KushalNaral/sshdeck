@@ -294,3 +294,29 @@ func TestLoginSecretsMoveIntoTheVaultAndBack(t *testing.T) {
 		t.Fatalf("after enabling: %q %v", pw, err)
 	}
 }
+
+func TestHistoryKeyFollowsTheLock(t *testing.T) {
+	s, sec, plainPath, vpath := plainWithData(t)
+	k1, err := s.HistoryKey()
+	if err != nil || len(k1) != 32 {
+		t.Fatalf("%v %d", err, len(k1))
+	}
+	if k, _ := s.HistoryKey(); !bytes.Equal(k, k1) {
+		t.Error("the key must stay the same between calls")
+	}
+	if _, err := s.EnableLock(vpath, "pass phrase"); err != nil {
+		t.Fatal(err)
+	}
+	if len(sec) != 0 {
+		t.Errorf("the key was left in the keyring: %v", sec)
+	}
+	if k, _ := s.HistoryKey(); !bytes.Equal(k, k1) {
+		t.Error("locking changed the key, so old history would be unreadable")
+	}
+	if err := s.DisableLock("pass phrase", plainPath, sec); err != nil {
+		t.Fatal(err)
+	}
+	if k, _ := s.HistoryKey(); !bytes.Equal(k, k1) {
+		t.Error("unlocking changed the key")
+	}
+}

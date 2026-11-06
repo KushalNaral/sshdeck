@@ -41,6 +41,45 @@ export namespace audit {
 
 }
 
+export namespace history {
+	
+	export class Version {
+	    id: string;
+	    server: string;
+	    path: string;
+	    time: number;
+	    author: string;
+	    login: string;
+	    kind: string;
+	    hash: string;
+	    size: number;
+	    note?: string;
+	    pinned?: boolean;
+	    remote?: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new Version(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.server = source["server"];
+	        this.path = source["path"];
+	        this.time = source["time"];
+	        this.author = source["author"];
+	        this.login = source["login"];
+	        this.kind = source["kind"];
+	        this.hash = source["hash"];
+	        this.size = source["size"];
+	        this.note = source["note"];
+	        this.pinned = source["pinned"];
+	        this.remote = source["remote"];
+	    }
+	}
+
+}
+
 export namespace main {
 	
 	export class ConnectResult {
@@ -101,6 +140,26 @@ export namespace main {
 	        this.size = source["size"];
 	        this.mode = source["mode"];
 	        this.mtime = source["mtime"];
+	    }
+	}
+	export class HistorySettings {
+	    off: boolean;
+	    noServerCopy: boolean;
+	    keep: number;
+	    days: number;
+	    deny: string[];
+	
+	    static createFrom(source: any = {}) {
+	        return new HistorySettings(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.off = source["off"];
+	        this.noServerCopy = source["noServerCopy"];
+	        this.keep = source["keep"];
+	        this.days = source["days"];
+	        this.deny = source["deny"];
 	    }
 	}
 	export class ImportRow {
@@ -235,6 +294,7 @@ export namespace main {
 	    content: string;
 	    version: string;
 	    mode: string;
+	    noHistory?: boolean;
 	
 	    static createFrom(source: any = {}) {
 	        return new TextFile(source);
@@ -246,6 +306,7 @@ export namespace main {
 	        this.content = source["content"];
 	        this.version = source["version"];
 	        this.mode = source["mode"];
+	        this.noHistory = source["noHistory"];
 	    }
 	}
 	export class Transfer {
@@ -467,6 +528,7 @@ export namespace store {
 	    software?: Software[];
 	    projects?: string[];
 	    note?: string;
+	    historyCopy?: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new Server(source);
@@ -490,6 +552,7 @@ export namespace store {
 	        this.software = this.convertValues(source["software"], Software);
 	        this.projects = source["projects"];
 	        this.note = source["note"];
+	        this.historyCopy = source["historyCopy"];
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {

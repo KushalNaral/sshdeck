@@ -4,6 +4,7 @@ import {probe} from '../models';
 import {main} from '../models';
 import {update} from '../models';
 import {vpn} from '../models';
+import {history} from '../models';
 import {audit} from '../models';
 import {store} from '../models';
 
@@ -35,6 +36,8 @@ export function CopySSHCommand(arg1:string):Promise<void>;
 
 export function Delete(arg1:string,arg2:Array<string>):Promise<void>;
 
+export function DeleteHistory(arg1:string,arg2:string):Promise<void>;
+
 export function DeleteLogin(arg1:string,arg2:string):Promise<void>;
 
 export function DeleteServer(arg1:string):Promise<void>;
@@ -54,6 +57,12 @@ export function EnableLock(arg1:string):Promise<Array<string>>;
 export function ExportCSV():Promise<string>;
 
 export function FetchGatewayCert(arg1:string,arg2:number):Promise<vpn.CertInfo>;
+
+export function FileHistory(arg1:string,arg2:string):Promise<Array<history.Version>>;
+
+export function GetHistorySettings():Promise<main.HistorySettings>;
+
+export function HistoryContent(arg1:string,arg2:string):Promise<string>;
 
 export function InstallDependencies(arg1:Array<string>):Promise<void>;
 
@@ -85,6 +94,8 @@ export function PickImport():Promise<main.ImportPreview>;
 
 export function PickUpload(arg1:string,arg2:string,arg3:boolean):Promise<main.UploadResult>;
 
+export function PinVersion(arg1:string,arg2:string,arg3:boolean,arg4:string):Promise<void>;
+
 export function ReadText(arg1:string,arg2:string):Promise<main.TextFile>;
 
 export function RecordConfirm(arg1:string,arg2:string):Promise<void>;
@@ -92,6 +103,8 @@ export function RecordConfirm(arg1:string,arg2:string):Promise<void>;
 export function Rename(arg1:string,arg2:string,arg3:string):Promise<void>;
 
 export function RestartApp():Promise<void>;
+
+export function RestoreVersion(arg1:string,arg2:string,arg3:string):Promise<string>;
 
 export function RetryTransfer(arg1:string):Promise<void>;
 
@@ -105,9 +118,15 @@ export function SaveTemplate():Promise<string>;
 
 export function SaveVPN(arg1:store.VPN,arg2:string):Promise<store.VPN>;
 
+export function ServerHistory(arg1:string,arg2:number):Promise<Array<history.Version>>;
+
 export function SetAutoReconnect(arg1:boolean):Promise<void>;
 
 export function SetAutoUpdateCheck(arg1:boolean):Promise<void>;
+
+export function SetHistoryCopy(arg1:string,arg2:string):Promise<void>;
+
+export function SetHistorySettings(arg1:main.HistorySettings):Promise<void>;
 
 export function SetLockSettings(arg1:number,arg2:boolean):Promise<void>;
 

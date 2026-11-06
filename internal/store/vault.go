@@ -79,6 +79,9 @@ func (s *Store) EnableLock(vaultPath, pass string) (leftover []string, err error
 			return nil, err
 		}
 	}
+	if err := collect("history/key"); err != nil {
+		return nil, err
+	}
 	d := s.d
 	d.Secrets = secrets
 	plain, err := json.MarshalIndent(d, "", "  ")

@@ -15,6 +15,8 @@ import (
 	"unicode/utf8"
 
 	"github.com/pkg/sftp"
+
+	"github.com/KushalNaral/sshdeck/internal/history"
 )
 
 // maxEdit is the biggest file the editor opens; bigger files are for download, not for a text widget.
@@ -40,6 +42,8 @@ type TextFile struct {
 	Content string `json:"content"`
 	Version string `json:"version"` // pass back to WriteText to notice that someone else changed the file
 	Mode    string `json:"mode"`
+	// NoHistory is set when history is off or this kind of file (keys, shadow) is never recorded.
+	NoHistory bool `json:"noHistory,omitempty"`
 }
 
 // ftp returns the SFTP client of a live connection.
@@ -170,7 +174,8 @@ func (a *App) ReadText(serverID, p string) (TextFile, error) {
 		return TextFile{}, errors.New("this does not look like a text file. Download it instead")
 	}
 	a.audit("file.open", a.serverName(serverID), p)
-	return TextFile{Path: p, Content: string(b), Version: versionOf(fi), Mode: perm(fi.Mode())}, nil
+	a.noteCurrent(serverID, p, b)
+	return TextFile{Path: p, Content: string(b), Version: versionOf(fi), Mode: perm(fi.Mode()), NoHistory: a.hist() == nil || a.denied(p)}, nil
 }
 
 func size(n int64) string {
@@ -190,6 +195,10 @@ const ErrChanged = "changed on the server since you opened it"
 // server no longer matches it nothing is written and the error says so. The file is written beside the target
 // and renamed over it, so a dropped connection never leaves a half-written file, and its permissions stay.
 func (a *App) WriteText(serverID, p, content, version string) (string, error) {
+	return a.writeText(serverID, p, content, version, history.Save)
+}
+
+func (a *App) writeText(serverID, p, content, version string, kind history.Kind) (string, error) {
 	cl, err := a.ftp(serverID)
 	if err != nil {
 		return "", err
@@ -206,6 +215,7 @@ func (a *App) WriteText(serverID, p, content, version string) (string, error) {
 	} else if version != "" && errors.Is(err, os.ErrNotExist) {
 		return "", errors.New("the file was removed on the server since you opened it")
 	}
+	a.snapshotBefore(serverID, cl, p)
 	tmp := p + ".sshdeck-part"
 	f, err := cl.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_TRUNC)
 	if err != nil { // no room to create a neighbour (a read-only folder): write the file itself
@@ -237,7 +247,25 @@ func (a *App) WriteText(serverID, p, content, version string) (string, error) {
 		return "", err
 	}
 	a.audit("file.save", a.serverName(serverID), p)
+	a.track(serverID, p, kind, who(), []byte(content))
 	return versionOf(fi), nil
+}
+
+// snapshotBefore keeps what is on the server right now, so a save can always be undone, even the first one.
+func (a *App) snapshotBefore(serverID string, cl *sftp.Client, p string) {
+	if a.hist() == nil || a.denied(p) {
+		return
+	}
+	f, err := cl.Open(p)
+	if err != nil {
+		return // a new file has nothing to keep
+	}
+	defer f.Close()
+	b, err := io.ReadAll(io.LimitReader(f, maxEdit+1))
+	if err != nil || len(b) > maxEdit || !utf8.Valid(b) {
+		return
+	}
+	a.noteCurrent(serverID, p, b)
 }
 
 // replace renames from over to, atomically when the server supports it.

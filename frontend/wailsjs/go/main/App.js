@@ -58,6 +58,10 @@ export function Delete(arg1, arg2) {
   return window['go']['main']['App']['Delete'](arg1, arg2);
 }
 
+export function DeleteHistory(arg1, arg2) {
+  return window['go']['main']['App']['DeleteHistory'](arg1, arg2);
+}
+
 export function DeleteLogin(arg1, arg2) {
   return window['go']['main']['App']['DeleteLogin'](arg1, arg2);
 }
@@ -96,6 +100,18 @@ export function ExportCSV() {
 
 export function FetchGatewayCert(arg1, arg2) {
   return window['go']['main']['App']['FetchGatewayCert'](arg1, arg2);
+}
+
+export function FileHistory(arg1, arg2) {
+  return window['go']['main']['App']['FileHistory'](arg1, arg2);
+}
+
+export function GetHistorySettings() {
+  return window['go']['main']['App']['GetHistorySettings']();
+}
+
+export function HistoryContent(arg1, arg2) {
+  return window['go']['main']['App']['HistoryContent'](arg1, arg2);
 }
 
 export function InstallDependencies(arg1) {
@@ -158,6 +174,10 @@ export function PickUpload(arg1, arg2, arg3) {
   return window['go']['main']['App']['PickUpload'](arg1, arg2, arg3);
 }
 
+export function PinVersion(arg1, arg2, arg3, arg4) {
+  return window['go']['main']['App']['PinVersion'](arg1, arg2, arg3, arg4);
+}
+
 export function ReadText(arg1, arg2) {
   return window['go']['main']['App']['ReadText'](arg1, arg2);
 }
@@ -172,6 +192,10 @@ export function Rename(arg1, arg2, arg3) {
 
 export function RestartApp() {
   return window['go']['main']['App']['RestartApp']();
+}
+
+export function RestoreVersion(arg1, arg2, arg3) {
+  return window['go']['main']['App']['RestoreVersion'](arg1, arg2, arg3);
 }
 
 export function RetryTransfer(arg1) {
@@ -198,12 +222,24 @@ export function SaveVPN(arg1, arg2) {
   return window['go']['main']['App']['SaveVPN'](arg1, arg2);
 }
 
+export function ServerHistory(arg1, arg2) {
+  return window['go']['main']['App']['ServerHistory'](arg1, arg2);
+}
+
 export function SetAutoReconnect(arg1) {
   return window['go']['main']['App']['SetAutoReconnect'](arg1);
 }
 
 export function SetAutoUpdateCheck(arg1) {
   return window['go']['main']['App']['SetAutoUpdateCheck'](arg1);
+}
+
+export function SetHistoryCopy(arg1, arg2) {
+  return window['go']['main']['App']['SetHistoryCopy'](arg1, arg2);
+}
+
+export function SetHistorySettings(arg1) {
+  return window['go']['main']['App']['SetHistorySettings'](arg1);
 }
 
 export function SetLockSettings(arg1, arg2) {

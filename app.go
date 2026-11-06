@@ -15,6 +15,7 @@ import (
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 
 	"github.com/KushalNaral/sshdeck/internal/audit"
+	"github.com/KushalNaral/sshdeck/internal/history"
 	"github.com/KushalNaral/sshdeck/internal/sshx"
 	"github.com/KushalNaral/sshdeck/internal/store"
 	"github.com/KushalNaral/sshdeck/internal/update"
@@ -39,6 +40,10 @@ type App struct {
 
 	// Seams so tests can run without a window or a network.
 	emit func(name string, data ...any)
+
+	// File history (history.go). histDir empty means no history.
+	histDir string
+	hs      *history.Store
 
 	// File transfers (files.go).
 	xmu      sync.Mutex
@@ -94,6 +99,7 @@ func NewApp() (*App, error) {
 	starter := vpn.DefaultStarter()
 	a := newApp(st, vpn.New(starter), sshx.Dial)
 	a.starter = starter
+	a.histDir = filepath.Join(base, "history")
 	a.vaultPath, a.settingsPath, a.plainPath = filepath.Join(base, "vault.enc"), filepath.Join(base, "settings.json"), filepath.Join(base, "data.json")
 	a.settings = loadSettings(a.settingsPath)
 	actor := "unknown"

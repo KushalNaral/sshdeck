@@ -15,14 +15,22 @@ import (
 // rigFiles connects the "direct" server and gives its client an in-process SFTP server that works on the real
 // disk, so remote paths are ordinary temp-dir paths.
 func rigFiles(t *testing.T) *App {
+	a, _ := rigFilesHome(t)
+	return a
+}
+
+// rigFilesHome is rigFiles that also says which folder is the login's home on the fake server.
+func rigFilesHome(t *testing.T) (*App, string) {
 	t.Helper()
 	a, _, _, d := rigDial(t, okOpen(newShell()))
 	a.ctx = context.Background()
+	a.histDir = filepath.Join(t.TempDir(), "history")
 	if r := a.Connect("direct"); !r.OK {
 		t.Fatalf("%+v", r)
 	}
 	c1, c2 := net.Pipe()
-	srv, err := sftp.NewServer(c1)
+	home := t.TempDir()
+	srv, err := sftp.NewServer(c1, sftp.WithServerWorkingDirectory(home))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -33,7 +41,7 @@ func rigFiles(t *testing.T) *App {
 	}
 	t.Cleanup(func() { cl.Close(); srv.Close() })
 	d.last().ftp = cl
-	return a
+	return a, home
 }
 
 func write(t *testing.T, p, s string) {
