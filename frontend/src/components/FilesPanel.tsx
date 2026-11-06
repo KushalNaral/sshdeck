@@ -1,9 +1,11 @@
-import { ArrowUp, Download, File as FileIcon, FilePlus, FileText, Folder, FolderPlus, FolderUp, Home, Link2, Pencil, RefreshCw, Trash2, Upload, X } from 'lucide-react'
+import { ArrowDown, ArrowUp, Download, File as FileIcon, FilePlus, FileText, Folder, FolderPlus, FolderUp, Home, Link2, Pencil, RefreshCw, Trash2, Upload, X } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { Backend } from '../api'
 import { basename, crumbs, dirname, humanSize, join, shortDate, validName } from '../lib/files'
 import type { FileEntry, Listing, Policy, StartResult, Transfer } from '../types'
+import { clamp, LIMITS, DEFAULT, type Layout } from '../lib/layout'
 import { Confirm } from './Confirm'
+import { Splitter } from './Splitter'
 
 interface Props {
   serverId: string
@@ -12,6 +14,8 @@ interface Props {
   backend: Backend
   /** Opens a file in the editor. */
   onEdit: (path: string) => void
+  layout: Layout
+  onLayout: (f: (l: Layout) => Layout) => void
 }
 
 // Where each server's panel was left, so switching servers and back does not lose your place.
@@ -20,7 +24,10 @@ const lastDir = new Map<string, string>()
 type Ask = { kind: 'up' | 'down'; res: StartResult; dir: string; remotes: string[] } | null
 const TEXTY = /\.(txt|md|json|ya?ml|toml|ini|conf|cnf|env|log|php|js|ts|tsx|jsx|css|scss|html?|xml|sh|bash|py|rb|go|rs|java|sql|service|timer|htaccess|gitignore|lock)$|^\.|^[A-Z][A-Za-z]*file$/i
 
-export function FilesPanel({ serverId, serverName, live, backend, onEdit }: Props) {
+type SortKey = 'name' | 'size' | 'mtime'
+
+export function FilesPanel({ serverId, serverName, live, backend, onEdit, layout, onLayout }: Props) {
+  const [sort, setSort] = useState<{ key: SortKey; asc: boolean }>({ key: 'name', asc: true })
   const [list, setList] = useState<Listing | null>(null)
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
@@ -70,7 +77,12 @@ export function FilesPanel({ serverId, serverName, live, backend, onEdit }: Prop
     seen.current = doneCount
   }, [doneCount, cwd, backend, serverId])
 
-  const entries = list?.entries ?? []
+  // Folders stay first whatever the order, like Explorer.
+  const entries = useMemo(() => {
+    const cmp = (a: FileEntry, b: FileEntry) =>
+      sort.key === 'size' ? a.size - b.size : sort.key === 'mtime' ? a.mtime - b.mtime : a.name.toLowerCase().localeCompare(b.name.toLowerCase())
+    return [...(list?.entries ?? [])].sort((a, b) => Number(b.dir) - Number(a.dir) || (sort.asc ? 1 : -1) * cmp(a, b))
+  }, [list, sort])
   const byPath = useMemo(() => new Map(entries.map((e) => [e.path, e])), [entries])
   const chosen = sel.map((p) => byPath.get(p)).filter((e): e is FileEntry => !!e)
   const flash = (m: string) => {
@@ -213,9 +225,11 @@ export function FilesPanel({ serverId, serverName, live, backend, onEdit }: Prop
     )
 
   const noPick = chosen.length === 0
+  const by = (key: SortKey) => setSort((o) => ({ key, asc: o.key === key ? !o.asc : true }))
+  const arrow = (key: SortKey) => (sort.key === key ? sort.asc ? <ArrowUp size={11} strokeWidth={2.5} /> : <ArrowDown size={11} strokeWidth={2.5} /> : null)
   const active = transfers.filter((t) => t.state === 'queued' || t.state === 'running')
   return (
-    <div className={`files${over ? ' dropping' : ''}`} ref={box} style={{ '--wails-drop-target': 'drop' } as React.CSSProperties} onKeyDown={onKey}>
+    <div className={`files${over ? ' dropping' : ''}`} ref={box} style={{ '--wails-drop-target': 'drop', '--c-size': `${layout.cols.size}px`, '--c-mod': `${layout.cols.modified}px` } as React.CSSProperties} onKeyDown={onKey}>
       <div className="files-bar">
         <button className="btn icon" onClick={() => void go(dirname(cwd))} disabled={!cwd || cwd === '/'} title="Up one folder (Backspace)" aria-label="Up one folder">
           <ArrowUp size={14} strokeWidth={2} />
@@ -269,10 +283,24 @@ export function FilesPanel({ serverId, serverName, live, backend, onEdit }: Prop
       </div>
 
       <div className="files-list" role="listbox" aria-multiselectable="true" aria-label={`Files in ${cwd}`} tabIndex={0}>
-        <div className="files-head" aria-hidden="true">
-          <span>Name</span>
-          <span>Size</span>
-          <span>Modified</span>
+        <div className="files-head" role="row">
+          <span role="columnheader" aria-sort={sort.key === 'name' ? (sort.asc ? 'ascending' : 'descending') : 'none'}>
+            <button className="sorter" onClick={() => by('name')}>
+              Name {arrow('name')}
+            </button>
+          </span>
+          <span role="columnheader" aria-sort={sort.key === 'size' ? (sort.asc ? 'ascending' : 'descending') : 'none'}>
+            <Splitter value={layout.cols.size} onChange={(px) => onLayout((l) => ({ ...l, cols: { ...l.cols, size: clamp(px, LIMITS.size) } }))} dir={-1} label="Resize the Size column" reset={DEFAULT.cols.size} />
+            <button className="sorter" data-r onClick={() => by('size')}>
+              {arrow('size')} Size
+            </button>
+          </span>
+          <span role="columnheader" aria-sort={sort.key === 'mtime' ? (sort.asc ? 'ascending' : 'descending') : 'none'}>
+            <Splitter value={layout.cols.modified} onChange={(px) => onLayout((l) => ({ ...l, cols: { ...l.cols, modified: clamp(px, LIMITS.modified) } }))} dir={-1} label="Resize the Modified column" reset={DEFAULT.cols.modified} />
+            <button className="sorter" onClick={() => by('mtime')}>
+              Modified {arrow('mtime')}
+            </button>
+          </span>
         </div>
         {editing?.isNew && <Rename key="new" initial="" kind={editing.isNew} onDone={commitEdit} onCancel={() => setEditing(null)} />}
         {entries.map((f) =>
@@ -317,7 +345,9 @@ export function FilesPanel({ serverId, serverName, live, backend, onEdit }: Prop
       </div>
 
       {transfers.length > 0 && (
-        <section className="xfers" aria-label="Transfers">
+        <>
+        <Splitter vertical value={layout.xferH} onChange={(px) => onLayout((l) => ({ ...l, xferH: clamp(px, LIMITS.xferH) }))} dir={-1} label="Resize the transfers list" reset={DEFAULT.xferH} />
+        <section className="xfers" aria-label="Transfers" style={{ maxHeight: layout.xferH }}>
           <header>
             <strong>Transfers{active.length ? ` · ${active.length} running` : ''}</strong>
             <button className="btn" onClick={() => backend.files.clear()} disabled={transfers.length === active.length}>
@@ -349,6 +379,7 @@ export function FilesPanel({ serverId, serverName, live, backend, onEdit }: Prop
             ))}
           </ul>
         </section>
+        </>
       )}
 
       {over && (

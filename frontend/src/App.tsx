@@ -22,7 +22,16 @@ import { vpnOf } from './lib/status'
 import { triage } from './lib/triage'
 import { lockApi, type LockState } from './lib/lock'
 import { applyTheme, loadTheme, THEMES } from './lib/theme'
+import { DEFAULT as DEFAULT_LAYOUT, LIMITS, clamp, loadLayout, sanitize, saveLayout, type Layout } from './lib/layout'
+import { Splitter } from './components/Splitter'
 import type { Analysis as AnalysisData, ContainerTab, Login, Mode, Server, Session, Task, Vpn } from './types'
+
+/** Grid tracks for the Firefight stage. A closed panel and its splitter take no room. */
+function stageColumns(l: Layout): string {
+  const rack = l.rackOpen ? `${l.rackW}px 5px` : '0px 0px'
+  const side = l.sideOpen ? `5px ${l.sideW}px` : '0px 0px'
+  return l.dock === 'right' ? `${rack} minmax(0, 1fr) ${side}` : `${rack} ${l.sideOpen ? `${l.sideW}px 5px` : '0px 0px'} minmax(0, 1fr)`
+}
 
 export default function App() {
   const [mode, setMode] = useState<Mode>('firefight')
@@ -43,6 +52,12 @@ export default function App() {
     if (mode !== 'admin') setAdminTab(undefined)
   }, [mode])
   const [ask, setAsk] = useState<{ title: string; body: string; label: string; run: () => void; cancelled?: () => void } | null>(null)
+  const [layout, setLayoutState] = useState(loadLayout)
+  const setLayout = useCallback((f: (l: Layout) => Layout) => setLayoutState((l) => {
+    const n = sanitize(f(l))
+    saveLayout(n)
+    return n
+  }), [])
   const [theme, setTheme] = useState(loadTheme)
   const cycleTheme = () => {
     const next = THEMES[(THEMES.indexOf(theme) + 1) % THEMES.length]
@@ -320,6 +335,8 @@ export default function App() {
         f()
       }
       if (e.key === 'k') act(() => setPalette(true))
+      else if (e.key === 'b') act(() => setLayout((l) => ({ ...l, rackOpen: !l.rackOpen })))
+      else if (e.key === '.') act(() => setLayout((l) => ({ ...l, sideOpen: !l.sideOpen })))
       else if (e.key === 't' && sessions[selected]?.state === 'live') act(() => addTab(selected))
       else if (e.key === 'l' && lockRef.current?.enabled) act(() => void lockApi.lock())
       else if (e.key === '1') act(() => setMode('firefight'))
@@ -329,7 +346,7 @@ export default function App() {
     // Capture phase: xterm stops key events before they bubble, so shortcuts must be caught first.
     window.addEventListener('keydown', onKey, true)
     return () => window.removeEventListener('keydown', onKey, true)
-  }, [selected, sessions, addTab])
+  }, [selected, sessions, addTab, setLayout])
 
   const sess = sessions[selected]
 
@@ -373,6 +390,20 @@ export default function App() {
             <kbd>Ctrl 1</kbd> <kbd>2</kbd> <kbd>3</kbd> Job
           </span>
         </div>
+        <div className="viewbtns" role="group" aria-label="Layout">
+          <button className="btn" aria-pressed={layout.rackOpen} onClick={() => setLayout((l) => ({ ...l, rackOpen: !l.rackOpen }))} title="Show or hide the server list (Ctrl B)">
+            Servers
+          </button>
+          <button className="btn" aria-pressed={layout.sideOpen} onClick={() => setLayout((l) => ({ ...l, sideOpen: !l.sideOpen }))} title="Show or hide the side panel (Ctrl .)">
+            Panel
+          </button>
+          <button className="btn" onClick={() => setLayout((l) => ({ ...l, dock: l.dock === 'right' ? 'left' : 'right' }))} title="Move the side panel to the other side of the terminal">
+            Dock: {layout.dock === 'right' ? 'Right' : 'Left'}
+          </button>
+          <button className="btn" onClick={() => setLayout(() => DEFAULT_LAYOUT)} title="Put every panel back to its default size and place">
+            Reset layout
+          </button>
+        </div>
         {newer && (
           <button className="btn solid" onClick={() => (setAdminTab('system'), setMode('admin'))} title="A newer version is available">
             Update {newer.latest}
@@ -389,7 +420,8 @@ export default function App() {
       </header>
 
       {server && (
-      <main className="stage" hidden={mode !== 'firefight'}>
+      <main className="stage" hidden={mode !== 'firefight'} data-dock={layout.dock} style={{ gridTemplateColumns: stageColumns(layout) }}>
+        {layout.rackOpen && (
         <Rack
           servers={servers}
           vpns={vpns}
@@ -401,6 +433,8 @@ export default function App() {
           onSelect={setSelected}
           onConnect={(id) => !sessions[id] && requestConnect(id)}
         />
+        )}
+        {layout.rackOpen && <Splitter className="s1" value={layout.rackW} onChange={(px) => setLayout((l) => ({ ...l, rackW: clamp(px, LIMITS.rackW) }))} dir={1} label="Resize the server list" reset={DEFAULT_LAYOUT.rackW} />}
         <div className="center">
           <ConnectBar
             server={server}
@@ -425,6 +459,8 @@ export default function App() {
             onCloseTab={closeTab}
           />
         </div>
+        {layout.sideOpen && <Splitter className="s2" value={layout.sideW} onChange={(px) => setLayout((l) => ({ ...l, sideW: clamp(px, LIMITS.sideW) }))} dir={layout.dock === 'right' ? -1 : 1} label="Resize the side panel" reset={DEFAULT_LAYOUT.sideW} />}
+        {layout.sideOpen && (
         <div className="side">
           <div className="sidetabs" role="tablist" aria-label="Side panel">
             <button role="tab" aria-selected={side === 'analysis'} onClick={() => setSide('analysis')}>
@@ -435,11 +471,12 @@ export default function App() {
             </button>
           </div>
           {side === 'files' ? (
-            <FilesPanel serverId={selected} serverName={server.name} live={live} backend={backend} onEdit={(p) => openDoc(selected, p)} />
+            <FilesPanel serverId={selected} serverName={server.name} live={live} backend={backend} onEdit={(p) => openDoc(selected, p)} layout={layout} onLayout={setLayout} />
           ) : (
             <Analysis server={server} triage={levels[server.id]} data={analysis[selected]} scanning={scanning === selected} error={scanErrors[selected]} connected={live} onExec={(c) => requestExec(selected, c)} onRescan={() => void scan(selected)} onTrack={(n, v) => trackSoftware(selected, n, v)} onCopySsh={() => attempt(() => configStore.copySSH(selected))} connection={<Connection server={server} vpns={vpns} session={sess} />} logins={<Logins server={server} onCopy={(l, f) => attempt(() => configStore.copyLogin(selected, l.id, f))} />} />
           )}
         </div>
+        )}
       </main>
       )}
 
