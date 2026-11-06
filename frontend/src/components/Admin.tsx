@@ -3,6 +3,7 @@ import { viaLabel } from '../lib/status'
 import type { Login, Server, Vpn, VpnKind } from '../types'
 import { VPN_LABEL } from '../types'
 import { AuditPanel } from './AuditPanel'
+import { HistorySettingsPanel } from './HistorySettingsPanel'
 import { GatewayCert } from './GatewayCert'
 import { ImportPanel } from './ImportPanel'
 import { LoginsEditor } from './LoginsEditor'
@@ -12,7 +13,7 @@ import { UpdatePanel } from './UpdatePanel'
 import type { LockState } from '../lib/lock'
 import { Mark } from './Mark'
 
-type Tab = 'servers' | 'vpns' | 'import' | 'system' | 'security' | 'audit'
+type Tab = 'servers' | 'vpns' | 'import' | 'system' | 'security' | 'history' | 'audit'
 
 interface Props {
   servers: Server[]
@@ -263,6 +264,7 @@ export function Admin({ servers, vpns, lock, onLockChange, onSaveServer, onDelet
         <button className="btn" aria-pressed={tab === 'import'} onClick={() => switchTab('import')}>Import</button>
         <button className="btn" aria-pressed={tab === 'system'} onClick={() => switchTab('system')}>System</button>
         <button className="btn" aria-pressed={tab === 'security'} onClick={() => switchTab('security')}>Security</button>
+        <button className="btn" aria-pressed={tab === 'history'} onClick={() => switchTab('history')}>History</button>
         <button className="btn" aria-pressed={tab === 'audit'} onClick={() => switchTab('audit')}>Audit</button>
         {(tab === 'servers' || tab === 'vpns') && <button className="btn" style={{ marginLeft: 'auto' }} onClick={() => (setCopyOf(null), setEditing('new'))}>Add {tab === 'servers' ? 'server' : 'VPN profile'}</button>}
       </div>
@@ -280,6 +282,7 @@ export function Admin({ servers, vpns, lock, onLockChange, onSaveServer, onDelet
           <SecurityPanel lock={lock} onChange={onLockChange} />
         </>
       )}
+      {tab === 'history' && <HistorySettingsPanel servers={servers} />}
       {tab === 'audit' && <AuditPanel />}
       <div className="admin-body" hidden={tab !== 'servers' && tab !== 'vpns'}>
         <div className="admin-list">

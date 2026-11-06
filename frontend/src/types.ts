@@ -38,6 +38,8 @@ export interface Server {
   production?: boolean
   /** Connect when sshdeck starts. */
   autoConnect?: boolean
+  /** Keep file history on the server too: on, off, or empty for the default (on, except on production). */
+  historyCopy?: '' | 'on' | 'off'
   os: string
   software: Software[]
   logins?: Login[]
@@ -176,6 +178,8 @@ export interface Listing {
 }
 export interface TextFile {
   path: string
+  /** History is off, or this kind of file (keys) is never recorded. */
+  noHistory?: boolean
   content: string
   version: string
   mode: string
@@ -199,3 +203,26 @@ export interface StartResult {
   cancelled?: boolean
 }
 export type Policy = 'ask' | 'skip' | 'replace' | 'keep'
+
+export type VersionKind = 'initial' | 'save' | 'restore' | 'outside'
+export interface Version {
+  id: string
+  server: string
+  path: string
+  time: number
+  author: string
+  login: string
+  kind: VersionKind
+  hash: string
+  size: number
+  note?: string
+  pinned?: boolean
+  remote?: boolean
+}
+export interface HistorySettings {
+  off: boolean
+  noServerCopy: boolean
+  keep: number
+  days: number
+  deny: string[]
+}

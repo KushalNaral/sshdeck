@@ -1,4 +1,4 @@
-import { ArrowDown, ArrowUp, Download, File as FileIcon, FilePlus, FileText, Folder, FolderPlus, FolderUp, Home, Link2, Pencil, RefreshCw, Trash2, Upload, X } from 'lucide-react'
+import { ArrowDown, ArrowUp, History, Download, File as FileIcon, FilePlus, FileText, Folder, FolderPlus, FolderUp, Home, Link2, Pencil, RefreshCw, Trash2, Upload, X } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { Backend } from '../api'
 import { basename, crumbs, dirname, humanSize, join, shortDate, validName } from '../lib/files'
@@ -14,6 +14,8 @@ interface Props {
   backend: Backend
   /** Opens a file in the editor. */
   onEdit: (path: string) => void
+  /** Opens the file in the editor with its history showing. */
+  onHistory: (path: string) => void
   layout: Layout
   onLayout: (f: (l: Layout) => Layout) => void
 }
@@ -26,7 +28,7 @@ const TEXTY = /\.(txt|md|json|ya?ml|toml|ini|conf|cnf|env|log|php|js|ts|tsx|jsx|
 
 type SortKey = 'name' | 'size' | 'mtime'
 
-export function FilesPanel({ serverId, serverName, live, backend, onEdit, layout, onLayout }: Props) {
+export function FilesPanel({ serverId, serverName, live, backend, onEdit, onHistory, layout, onLayout }: Props) {
   const [sort, setSort] = useState<{ key: SortKey; asc: boolean }>({ key: 'name', asc: true })
   const [list, setList] = useState<Listing | null>(null)
   const [error, setError] = useState('')
@@ -276,6 +278,9 @@ export function FilesPanel({ serverId, serverName, live, backend, onEdit, layout
         </button>
         <button className="btn icon" onClick={() => setEditing({ path: chosen[0].path })} disabled={chosen.length !== 1} title="Rename (F2)" aria-label="Rename">
           <Pencil size={14} strokeWidth={2} />
+        </button>
+        <button className="btn icon" onClick={() => onHistory(chosen[0].path)} disabled={chosen.length !== 1 || chosen[0].dir} title="History of the selected file" aria-label="History">
+          <History size={14} strokeWidth={2} />
         </button>
         <button className="btn icon" onClick={() => setDel(chosen.map((c) => c.path))} disabled={noPick} title="Delete (Del)" aria-label="Delete">
           <Trash2 size={14} strokeWidth={2} />

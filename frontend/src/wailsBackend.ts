@@ -1,7 +1,7 @@
 import * as App from '../wailsjs/go/main/App'
 import { EventsOn } from '../wailsjs/runtime/runtime'
-import { ConnectError, type Backend, type FilesApi } from './api'
-import type { Analysis, Link, Listing, Step, Transfer } from './types'
+import { ConnectError, type Backend, type FilesApi, type HistoryApi } from './api'
+import type { Analysis, HistorySettings, Link, Listing, Step, Transfer, Version } from './types'
 
 const fromBase64 = (b64: string) => Uint8Array.from(atob(b64), (c) => c.charCodeAt(0))
 
@@ -38,8 +38,24 @@ const files: FilesApi = {
   onDrop: (cb) => EventsOn('files:dropped', cb),
 }
 
+const history: HistoryApi = {
+  file: async (s, p) => ((await go(App.FileHistory(s, p))) ?? []) as Version[],
+  server: async (s, n) => ((await go(App.ServerHistory(s, n))) ?? []) as Version[],
+  content: (s, id) => go(App.HistoryContent(s, id)),
+  pin: (s, id, pinned, note) => go(App.PinVersion(s, id, pinned, note)),
+  restore: (s, p, id) => go(App.RestoreVersion(s, p, id)),
+  remove: (s, p) => go(App.DeleteHistory(s, p)),
+  settings: async () => {
+    const h = await go(App.GetHistorySettings())
+    return { ...h, deny: h.deny ?? [] } as HistorySettings
+  },
+  saveSettings: (s) => go(App.SetHistorySettings(s as never)),
+  setCopy: (s, m) => go(App.SetHistoryCopy(s, m)),
+}
+
 export const wailsBackend: Backend = {
   files,
+  history,
   async connect(server, _vpn, onSteps) {
     const off = EventsOn(`connect:${server.id}`, (steps: Step[]) => onSteps(steps))
     try {

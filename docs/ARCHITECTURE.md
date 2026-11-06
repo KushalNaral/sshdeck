@@ -40,6 +40,7 @@ process is in Go. The UI asks, Go acts, and Go pushes progress back as events.
 | `main`, `app.go` | Window setup (CSP-friendly options, single instance), the `App` struct, lifecycle (startup, shutdown, confirm-on-close), CRUD pass-through to the store | `App` |
 | `conn.go` | Connect flow, shells and tabs on one shared SSH connection, container shells, analysis entry point | `Connect`, `AttachShell`, `OpenContainerShell`, `Analyze` |
 | `files.go`, `transfers.go` | Remote files over SFTP (list, read, save, rename, delete) and the upload/download queue | `ListDir`, `ReadText`, `WriteText`, `Upload`, `Download`, `Transfer` |
+| `history.go` | When a file version is recorded, who made it, the copy on the server, and the bindings the UI uses | `FileHistory`, `RestoreVersion`, `ServerHistory`, `SetHistoryCopy` |
 | `lock.go`, `settings.go` | Passphrase lock, idle timeout, lock settings, audit view bindings | `Lock`, `Unlock`, `EnableLock`, `DisableLock`, `ListAudit` |
 | `perm.go` | Startup check that the config directory and files are private | `checkConfigDir` |
 | `deps.go` | Check and install the programs sshdeck needs (VPN clients) | `CheckDependencies`, `InstallDependencies` |
@@ -49,6 +50,7 @@ process is in Go. The UI asks, Go acts, and Go pushes progress back as events.
 | `internal/sshx` | SSH login (password, key file or ssh-agent) with host-key trust and keepalive; one connection shared by many shells, commands and the SFTP client | `Client`, `Dial`, `Session` |
 | `internal/vpn` | Start and stop VPN client processes and watch their output | `Manager`, `Starter`, `Proc`, `CertError` |
 | `internal/probe` | Run read-only commands and parse them into a report | `Analyze`, `Report`, `Run` |
+| `internal/history` | Versions of edited files: sealed storage, pruning, and the shared copy on the server | `Store`, `Version`, `WriteRemote`, `ListRemote` |
 | `internal/importer` | Read the master `.ods` project list | `ReadODS`, `Projects`, `Sheet.Pairs` |
 | `frontend/src` | The UI (see section 8) | `Backend` interface |
 
@@ -179,6 +181,47 @@ connection and fail with "not connected" otherwise.
 The editor is Monaco, loaded the first time a file is opened. Each open file keeps its own editor, hidden while
 another tab is in front, so edits and undo history survive switching tabs. Languages are bundled (highlighting,
 plus Monaco's own JSON, TypeScript, CSS and HTML services). There are no language servers; that is not built.
+
+### File history
+
+Every save in the editor keeps the text it replaced, so a change can be compared and put back. It is small on
+purpose: per-file versions, not a repository.
+
+- **What is a version:** `Version` has the file path, time, who made it, the SSH login it was written as, a kind
+  and the size. Kinds: `initial` (the file as sshdeck first saw it, which is what makes the first edit
+  undoable), `save`, `restore` and `outside` (the text on the server differs from the newest version we
+  have, so something else changed it; nobody is named).
+- **When it is recorded** (`history.go`): `ReadText` and `WriteText` compare the text on the server with the
+  newest recorded version before doing anything, then `WriteText` records the new text after the write. Equal text
+  adds nothing. Recording never fails a save; problems go to the audit trail as `history.fail`. Restoring is an
+  ordinary save of an old text with the usual changed-on-the-server check, so history is never rewritten.
+- **Who:** the local user and host (`rome@laptop`) and the SSH login. This is only as good as the edit going through
+  sshdeck; a change made in a shell shows up as `outside` the next time the file is opened.
+- **Storage** (`internal/history`): `<config>/history/index/<server>.enc` holds the versions, and
+  `blobs/<xx>/<name>` holds each distinct text once (gzip, then sealed with XChaCha20-Poly1305). Blob names are an
+  HMAC of the content hash, so a file name says nothing about what is inside. The key is a random 32 bytes kept
+  like a password (`Store.HistoryKey`: OS keyring, or inside the vault), so turning the passphrase lock on or off
+  needs no re-encryption of history.
+- **Pruning:** after each record, a file keeps its newest 50 versions and drops those older than 90 days (both set
+  in Admin, History), except the newest and pinned ones. Blobs nothing refers to are deleted.
+- **Skipped files:** key-like names (`id_rsa*`, `*.pem`, `*.key`, `shadow`, `*.kdbx` and more) are never recorded,
+  plus any patterns in settings.
+- **Copy on the server:** each version is also written to `~/.sshdeck/history/<hash of path>/` on the server
+  (`.json` for who and when, `.gz` for the text; directories 0700, files 0600), so everyone who edits through
+  sshdeck sees the same trail. Listing a file or a server imports versions it does not have yet (without their
+  text, which is fetched when the version is opened and checked against its recorded hash). The same pruning
+  rules apply there, except pins, which are local. It is on by default, off by default on servers marked
+  production until someone turns it on (`Server.HistoryCopy`), and can be turned off for all servers. Failures
+  here never fail a save.
+- **Old secrets stay in history.** A password removed from a config file is still in earlier versions. Deleting
+  history for a file, or for a whole server, removes the local and the server copy.
+
+### Layout
+
+The Firefight stage is a grid whose track sizes come from `lib/layout.ts` (server list width, side panel width,
+which side the panel docks to, whether each is open, file column widths). `Splitter` is a keyboard-operable
+separator; the values are clamped and kept in `localStorage`, and "Reset layout" restores the defaults. This
+is only per-user presentation, so it is not part of the vault or the settings file.
 
 ## 6. VPN
 
@@ -315,9 +358,10 @@ api.ts               the Backend interface, ConnectError, and the demo mockBacke
 wailsBackend.ts      Backend implemented with the Wails bindings and events
 backend.ts           picks wailsBackend inside the window, mockBackend in a plain browser
 lib/config.ts        ConfigStore: Go store inside Wails, localStorage demo data otherwise
-components/          Rack, ConnectBar, Connection, TerminalPane/Term, FilesPanel, Editor, Analysis, TasksBoard, Palette, Admin,
+components/          Rack, ConnectBar, Connection, TerminalPane/Term, FilesPanel, Editor, HistoryDrawer, HistoryPanel,
+                     Splitter, Analysis, TasksBoard, Palette, Admin,
                      SystemPanel, SecurityPanel, AuditPanel, LockScreen, Confirm
-lib/                 config, lock, audit, theme, version, status, files, monaco
+lib/                 config, lock, audit, theme, version, status, files, monaco, layout, history
 mockFiles.ts         demo file tree for the browser preview
 ```
 
@@ -397,6 +441,9 @@ memory while in use.
   reported above.
 - `govulncheck` reports one advisory in `golang.org/x/crypto` v0.58.0 that sshdeck does not call; the fix exists only
   on an untagged commit, so upgrade when a release carries it.
+- History is per file path, so a renamed file starts a new history, and two people saving at the same moment are
+  not merged (the second save is refused and offers overwrite or reload). The server copy is only as private as
+  the login's home folder.
 - Files: no resume for interrupted transfers, no permission editing, no symlink creation, and files over 2 MB
   cannot be edited in the app. The editor has no language servers.
 - Organisation mode (central inventory, OIDC, per-user access) is designed in [ORG-MODE.md](ORG-MODE.md), not built.

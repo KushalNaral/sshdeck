@@ -1,5 +1,6 @@
 import type { FilesApi } from './api'
-import type { FileEntry, Policy, StartResult, Transfer } from './types'
+import type { HistoryApi } from './api'
+import type { FileEntry, HistorySettings, Policy, StartResult, Transfer, Version } from './types'
 
 /** Demo file tree for the browser preview: one small site, the same on every server. */
 const T0 = 1_760_000_000
@@ -73,6 +74,7 @@ export const mockFiles: FilesApi = {
   async write(_s, p, content, version) {
     await sleep(200)
     if (version && version !== versionOf(p)) throw new Error('changed on the server since you opened it')
+    note(p, content, 'save')
     files.set(p, content)
     versions.set(p, String(ver++))
     return versionOf(p)
@@ -128,4 +130,64 @@ export const mockFiles: FilesApi = {
   onDrop() {
     return () => {}
   },
+}
+
+// ---- demo history ----
+const NOW = Date.now()
+const vers: Version[] = []
+const texts = new Map<string, string>()
+let vseq = 0
+function add(path: string, body: string, kind: Version['kind'], author: string, login: string, agoMin: number, extra: Partial<Version> = {}) {
+  const id = `v${++vseq}`
+  texts.set(id, body)
+  vers.push({ id, server: '', path, time: NOW - agoMin * 60_000, author, login, kind, hash: id, size: body.length, ...extra })
+}
+const ME = 'rome@laptop'
+add('/home/deploy/site/public/index.php', "<?php\nrequire 'vendor/autoload.php';\n(new App)->run();\n", 'initial', '', 'deploy', 60 * 24 * 5)
+add('/home/deploy/site/public/index.php', "<?php\ndeclare(strict_types=1);\nrequire 'vendor/autoload.php';\n(new App)->run();\n", 'save', 'sam@desk', 'deploy', 60 * 30, { remote: true })
+add('/home/deploy/site/public/index.php', files.get('/home/deploy/site/public/index.php') ?? '', 'outside', '', 'deploy', 60 * 3)
+add('/etc/nginx/nginx.conf', 'worker_processes 1;\n', 'initial', '', 'deploy', 60 * 48)
+add('/etc/nginx/nginx.conf', files.get('/etc/nginx/nginx.conf') ?? '', 'save', ME, 'deploy', 25, { pinned: true, note: 'before the TLS change' })
+
+function note(path: string, body: string, kind: Version['kind']) {
+  if (vers.filter((v) => v.path === path).length === 0) add(path, files.get(path) ?? '', 'initial', '', 'deploy', 1)
+  if (texts.get(vers.filter((v) => v.path === path).sort((a, b) => b.time - a.time)[0]?.id ?? '') === body) return
+  add(path, body, kind, ME, 'deploy', 0)
+}
+
+let settings: HistorySettings = { off: false, noServerCopy: false, keep: 50, days: 90, deny: [] }
+const forServer = (s: string) => vers.map((v) => ({ ...v, server: s }))
+export const mockHistory: HistoryApi = {
+  async file(s, p) {
+    await sleep(80)
+    return forServer(s).filter((v) => v.path === p).sort((a, b) => b.time - a.time)
+  },
+  async server(s, n) {
+    await sleep(80)
+    return forServer(s).sort((a, b) => b.time - a.time).slice(0, n)
+  },
+  async content(_s, id) {
+    return texts.get(id) ?? ''
+  },
+  async pin(_s, id, pinned, noteText) {
+    const v = vers.find((x) => x.id === id)
+    if (v) Object.assign(v, { pinned, note: noteText })
+  },
+  async restore(_s, p, id) {
+    const body = texts.get(id) ?? ''
+    note(p, body, 'restore')
+    files.set(p, body)
+    versions.set(p, String(ver++))
+    return versionOf(p)
+  },
+  async remove(_s, p) {
+    for (let i = vers.length - 1; i >= 0; i--) if (!p || vers[i].path === p) vers.splice(i, 1)
+  },
+  async settings() {
+    return settings
+  },
+  async saveSettings(s) {
+    settings = s
+  },
+  async setCopy() {},
 }

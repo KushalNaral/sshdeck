@@ -1,5 +1,5 @@
-import type { Analysis, Dep, Link, Listing, Policy, Server, StartResult, Step, TextFile, Transfer, Vpn } from './types'
-import { mockFiles } from './mockFiles'
+import type { Analysis, Dep, Link, HistorySettings, Listing, Policy, Server, StartResult, Step, TextFile, Transfer, Version, Vpn } from './types'
+import { mockFiles, mockHistory } from './mockFiles'
 
 /** Everything the UI needs from the Go side. The Wails bindings will implement this same shape. */
 /** Files on the server (SFTP) and the transfer queue. Every call needs a live connection. */
@@ -25,8 +25,26 @@ export interface FilesApi {
   onDrop(cb: (d: { x: number; y: number; paths: string[] }) => void): () => void
 }
 
+/** Earlier versions of edited files. Listing and reading need no connection; restoring does. */
+export interface HistoryApi {
+  file(serverId: string, path: string): Promise<Version[]>
+  /** The latest edits across all files of a server, newest first. */
+  server(serverId: string, limit: number): Promise<Version[]>
+  content(serverId: string, versionId: string): Promise<string>
+  pin(serverId: string, versionId: string, pinned: boolean, note: string): Promise<void>
+  /** Writes the version back to the server as a new version. Returns the file's new version. */
+  restore(serverId: string, path: string, versionId: string): Promise<string>
+  /** Forgets a file's history, or all of the server's when path is empty. */
+  remove(serverId: string, path: string): Promise<void>
+  settings(): Promise<HistorySettings>
+  saveSettings(s: HistorySettings): Promise<void>
+  /** Keep a copy of the history on the server itself: on, off, or '' for the default. */
+  setCopy(serverId: string, mode: '' | 'on' | 'off'): Promise<void>
+}
+
 export interface Backend {
   files: FilesApi
+  history: HistoryApi
   connect(server: Server, vpn: Vpn | undefined, onSteps: (steps: Step[]) => void): Promise<void>
   confirmManualVpn(serverId: string): void
   disconnect(serverId: string): void
@@ -100,6 +118,7 @@ const manual = new Map<string, () => void>()
 
 export const mockBackend: Backend = {
   files: mockFiles,
+  history: mockHistory,
   async connect(server, vpn, onSteps) {
     demoServers.set(server.id, server)
     const steps: Step[] = []

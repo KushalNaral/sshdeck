@@ -1,11 +1,20 @@
-import { Save, RotateCcw, WrapText } from 'lucide-react'
+import { History, Save, RotateCcw, WrapText } from 'lucide-react'
 import type * as Monaco from 'monaco-editor'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { Backend } from '../api'
 import { languageFor, loadMonaco, wantDark } from '../lib/monaco'
+import type { Server } from '../types'
+import { Confirm } from './Confirm'
+import { DiffView } from './DiffView'
+import { HistoryDrawer, type DiffPick } from './HistoryDrawer'
 
 interface Props {
-  serverId: string
+  server: Server
+  /** Whether the server has a live connection (needed to restore). */
+  live: boolean
+  /** Counts up each time something asks for this file's history to open. */
+  historyAsk: number
+  onCopy: (mode: '' | 'on' | 'off') => void
   path: string
   backend: Backend
   visible: boolean
@@ -15,7 +24,8 @@ interface Props {
 type Conflict = 'changed' | null
 
 /** One file open in Monaco. It stays mounted (hidden) while another tab is in front, so edits and undo history survive. */
-export function Editor({ serverId, path, backend, visible, onDirty }: Props) {
+export function Editor({ server, live, historyAsk, onCopy, path, backend, visible, onDirty }: Props) {
+  const serverId = server.id
   const host = useRef<HTMLDivElement>(null)
   const ed = useRef<Monaco.editor.IStandaloneCodeEditor | null>(null)
   const mon = useRef<typeof Monaco | null>(null)
@@ -31,6 +41,12 @@ export function Editor({ serverId, path, backend, visible, onDirty }: Props) {
   const [lang, setLang] = useState('plaintext')
   const [mode, setMode] = useState('')
   const [note, setNote] = useState('')
+  const [drawer, setDrawer] = useState(false)
+  const [rev, setRev] = useState(0)
+  const [diff, setDiff] = useState<DiffPick | null>(null)
+  const [noHist, setNoHist] = useState(false)
+  const [ask, setAsk] = useState(false)
+  useEffect(() => void (historyAsk > 0 && setDrawer(true)), [historyAsk])
 
   const markDirty = useCallback(
     (d: boolean) => {
@@ -53,6 +69,7 @@ export function Editor({ serverId, path, backend, visible, onDirty }: Props) {
         setConflict(null)
         markDirty(false)
         setNote('Saved')
+        setRev((r) => r + 1)
       } catch (err) {
         const m = err instanceof Error ? err.message : String(err)
         if (m.includes('changed on the server')) setConflict('changed')
@@ -73,6 +90,8 @@ export function Editor({ serverId, path, backend, visible, onDirty }: Props) {
       version.current = f.version
       saved.current = f.content
       setMode(f.mode)
+      setNoHist(!!f.noHistory)
+      setRev((r) => r + 1)
       setLang(languageFor(m, path))
       if (!ed.current && host.current) {
         const model = m.editor.createModel(f.content, languageFor(m, path), m.Uri.parse(`sshdeck://${serverId}${path}`))
@@ -144,6 +163,9 @@ export function Editor({ serverId, path, backend, visible, onDirty }: Props) {
         >
           <RotateCcw size={14} strokeWidth={2} /> Reload
         </button>
+        <button className="btn" aria-pressed={drawer} onClick={() => setDrawer((d) => !d)} title="Earlier versions of this file: who changed it and when">
+          <History size={14} strokeWidth={2} /> History
+        </button>
         <button className="btn" aria-pressed={wrap} onClick={() => setWrap((w) => !w)} title="Wrap long lines">
           <WrapText size={14} strokeWidth={2} /> Wrap
         </button>
@@ -166,7 +188,32 @@ export function Editor({ serverId, path, backend, visible, onDirty }: Props) {
           </button>
         </div>
       )}
-      <div className="edhost" ref={host} />
+      <div className="edbody">
+        <div className="edmain">
+          <div className="edhost" ref={host} />
+          {diff && (
+            <div className="diffwrap">
+              <div className="diffbar">
+                <span>
+                  <strong>{diff.a.label}</strong> → <strong>{diff.b.label}</strong>
+                </span>
+                {diff.restore && (
+                  <button className="btn" disabled={!live} onClick={() => setAsk(true)} title={live ? 'Write the older version back to the server' : 'Connect to restore'}>
+                    Restore the older version
+                  </button>
+                )}
+                <button className="btn" onClick={() => setDiff(null)}>
+                  Close diff
+                </button>
+              </div>
+              <DiffView original={diff.a.text} modified={diff.b.text} language={lang} />
+            </div>
+          )}
+        </div>
+        {drawer && (
+          <HistoryDrawer server={server} path={path} backend={backend} rev={rev} current={() => ed.current?.getValue() ?? ''} live={live} noHistory={noHist} onPick={setDiff} onCopy={onCopy} onClose={() => (setDrawer(false), setDiff(null))} />
+        )}
+      </div>
       {state === 'loading' && <div className="empty"><strong>Opening {name}…</strong></div>}
       {state === 'error' && (
         <div className="empty">
@@ -176,6 +223,22 @@ export function Editor({ serverId, path, backend, visible, onDirty }: Props) {
             Try again
           </button>
         </div>
+      )}
+      {ask && diff?.restore && (
+        <Confirm
+          title={`Restore ${name} to this version?`}
+          body={`${diff.a.label}. The file on ${server.name} is replaced now, and what is there today stays in history, so you can undo this.`}
+          confirmLabel="Restore"
+          onCancel={() => setAsk(false)}
+          onConfirm={() => {
+            const v = diff.restore!
+            setAsk(false)
+            void backend.history
+              .restore(serverId, path, v.id)
+              .then(() => (setDiff(null), load()))
+              .catch((e) => setNote(`Not restored: ${e instanceof Error ? e.message : String(e)}`))
+          }}
+        />
       )}
       <div className="edstatus" aria-live="polite">
         <span>{dirty ? 'Modified' : (note || 'Saved')}</span>

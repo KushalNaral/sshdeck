@@ -15,6 +15,7 @@ import { Palette } from './components/Palette'
 import { Rack } from './components/Rack'
 import { TerminalPane, type Doc } from './components/TerminalPane'
 import { FilesPanel } from './components/FilesPanel'
+import { HistoryPanel } from './components/HistoryPanel'
 import { auditApi } from './lib/audit'
 import { configStore, messageOf, type Config } from './lib/config'
 import { useNow } from './lib/now'
@@ -215,9 +216,13 @@ export default function App() {
   // Files open in the editor, per server. A tab shows a dot while it has unsaved changes.
   const [docs, setDocs] = useState<Record<string, Doc[]>>({})
   const [activeDoc, setActiveDoc] = useState<Record<string, string | null>>({})
-  const [side, setSide] = useState<'analysis' | 'files'>('analysis')
-  const openDoc = (id: string, path: string) => {
-    setDocs((d) => ((d[id] ?? []).some((x) => x.path === path) ? d : { ...d, [id]: [...(d[id] ?? []), { path, dirty: false }] }))
+  const [side, setSide] = useState<'analysis' | 'files' | 'history'>('analysis')
+  const openDoc = (id: string, path: string, history = false) => {
+    setDocs((d) => {
+      const list = d[id] ?? []
+      if (!list.some((x) => x.path === path)) return { ...d, [id]: [...list, { path, dirty: false, history: history ? 1 : 0 }] }
+      return history ? { ...d, [id]: list.map((x) => (x.path === path ? { ...x, history: (x.history ?? 0) + 1 } : x)) } : d
+    })
     setActiveDoc((a) => ({ ...a, [id]: path }))
   }
   const docsRef = useRef(docs)
@@ -454,6 +459,7 @@ export default function App() {
             activeDoc={activeDoc}
             onDoc={(id, path) => setActiveDoc((a) => ({ ...a, [id]: path }))}
             onCloseDoc={closeDoc}
+            onHistoryCopy={(id, mode) => void attempt(async () => { await backend.history.setCopy(id, mode); setConfig((c) => ({ ...c, servers: c.servers.map((x) => (x.id === id ? { ...x, historyCopy: mode } : x)) })) })}
             onDirty={(id, path, dirty) => setDocs((d) => ({ ...d, [id]: (d[id] ?? []).map((x) => (x.path === path && x.dirty !== dirty ? { ...x, dirty } : x)) }))}
             onAddTab={addTab}
             onCloseTab={closeTab}
@@ -469,9 +475,14 @@ export default function App() {
             <button role="tab" aria-selected={side === 'files'} onClick={() => setSide('files')} title="Browse, transfer and edit files on this server">
               Files
             </button>
+            <button role="tab" aria-selected={side === 'history'} onClick={() => setSide('history')} title="Who edited which files on this server, and when">
+              History
+            </button>
           </div>
-          {side === 'files' ? (
-            <FilesPanel serverId={selected} serverName={server.name} live={live} backend={backend} onEdit={(p) => openDoc(selected, p)} layout={layout} onLayout={setLayout} />
+          {side === 'history' ? (
+            <HistoryPanel serverId={selected} serverName={server.name} backend={backend} live={live} onOpen={(p) => openDoc(selected, p, true)} />
+          ) : side === 'files' ? (
+            <FilesPanel serverId={selected} serverName={server.name} live={live} backend={backend} onEdit={(p) => openDoc(selected, p)} onHistory={(p) => openDoc(selected, p, true)} layout={layout} onLayout={setLayout} />
           ) : (
             <Analysis server={server} triage={levels[server.id]} data={analysis[selected]} scanning={scanning === selected} error={scanErrors[selected]} connected={live} onExec={(c) => requestExec(selected, c)} onRescan={() => void scan(selected)} onTrack={(n, v) => trackSoftware(selected, n, v)} onCopySsh={() => attempt(() => configStore.copySSH(selected))} connection={<Connection server={server} vpns={vpns} session={sess} />} logins={<Logins server={server} onCopy={(l, f) => attempt(() => configStore.copyLogin(selected, l.id, f))} />} />
           )}

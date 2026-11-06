@@ -7,6 +7,8 @@ import { Term } from './Term'
 export interface Doc {
   path: string
   dirty: boolean
+  /** Counts up when something asks to open this file's history. */
+  history?: number
 }
 
 interface Props {
@@ -23,9 +25,10 @@ interface Props {
   onDoc: (serverId: string, path: string) => void
   onCloseDoc: (serverId: string, path: string) => void
   onDirty: (serverId: string, path: string, dirty: boolean) => void
+  onHistoryCopy: (serverId: string, mode: '' | 'on' | 'off') => void
 }
 
-export function TerminalPane({ servers, sessions, selected, backend, onTab, onAddTab, onCloseTab, docs, activeDoc, onDoc, onCloseDoc, onDirty }: Props) {
+export function TerminalPane({ servers, sessions, selected, backend, onTab, onAddTab, onCloseTab, docs, activeDoc, onDoc, onCloseDoc, onDirty, onHistoryCopy }: Props) {
   const live = Object.values(sessions).filter((s) => s.state === 'live')
   const cur = sessions[selected]
   const myDocs = docs[selected] ?? []
@@ -81,7 +84,7 @@ export function TerminalPane({ servers, sessions, selected, backend, onTab, onAd
           const server = servers.find((x) => x.id === s.serverId)!
           return s.tabs.map((t) => <Term key={`${s.serverId}-${t}`} server={server} tab={t} container={s.tabInfo?.[t]} backend={backend} visible={s.serverId === selected && s.activeTab === t && !activeDoc[s.serverId]} />)
         })}
-        {Object.entries(docs).flatMap(([sid, list]) => list.map((d) => <Editor key={`${sid}:${d.path}`} serverId={sid} path={d.path} backend={backend} visible={sid === selected && activeDoc[sid] === d.path} onDirty={(x) => onDirty(sid, d.path, x)} />))}
+        {Object.entries(docs).flatMap(([sid, list]) => list.map((d) => <Editor key={`${sid}:${d.path}`} server={servers.find((x) => x.id === sid)!} live={sessions[sid]?.state === 'live'} historyAsk={d.history ?? 0} onCopy={(m) => onHistoryCopy(sid, m)} path={d.path} backend={backend} visible={sid === selected && activeDoc[sid] === d.path} onDirty={(x) => onDirty(sid, d.path, x)} />))}
         {cur?.state !== 'live' && !front && (
           <div className="empty">
             <strong>{cur?.state === 'connecting' ? 'Opening the path to the shell…' : 'No shell open'}</strong>

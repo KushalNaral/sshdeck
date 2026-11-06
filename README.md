@@ -12,6 +12,8 @@ one is needed, logs in over SSH and opens a terminal. It also reads each server 
   Linux client, so you connect it yourself and confirm in the app.
 - `docker exec` shells inside containers
 - Files tab: browse a server over SFTP, upload and download with drag and drop, and edit files in an editor tab
+- File history: every save keeps the old text, with who changed it and when, so you can compare and restore
+- Panels you can resize, hide and dock
 - Read-only scan of each server: OS, memory, disks, failed services, containers and software versions
 - Servers ranked 1 to 5 by failed services, full disks, outdated software and overdue tasks, with the reasons shown
 - Tasks tied to servers
@@ -59,6 +61,15 @@ shown as new, update or error before anything is saved, and a blank password kee
 The Files tab next to Analysis lists the server's folders. Upload with the button or by dragging files in, and
 download the selection. Double-click a file to edit it in a tab (Ctrl+S saves). If the file changed on the server
 since you opened it, sshdeck asks before overwriting. Files over 2 MB or that are not text are download-only.
+
+Every save keeps the text it replaced. The History button in the editor lists the versions of a file; click one to
+see what changed, and Restore puts it back (as a new version). The History tab next to Files shows who edited what on
+the server. By default a copy of the history is also written to `~/.sshdeck/history` on the server so teammates see
+each other's edits; production servers need it turned on first. Old versions can hold passwords, so Admin, History
+has the settings and a delete button.
+
+Drag the borders between panels to resize them, Ctrl+B hides the server list, Ctrl+. hides the side panel, and
+"Dock" moves the side panel next to the server list. "Reset layout" puts everything back.
 
 The passphrase lock is in Admin, Security. There is no recovery if the passphrase is lost.
 
