@@ -20,7 +20,7 @@ export function ago(ms: number, now = Date.now()): string {
 
 export const exact = (ms: number) => new Date(ms).toLocaleString('en-GB')
 
-/** Who made the change: "rome@laptop as deploy", or what we know when nobody here did. */
+/** Who made the change: "sam@laptop as deploy", or what we know when nobody here did. */
 export function by(v: Pick<Version, 'author' | 'login' | 'kind'>): string {
   if (!v.author) return v.kind === 'initial' ? 'before sshdeck' : 'someone, outside sshdeck'
   return v.login ? `${v.author} as ${v.login}` : v.author

@@ -66,7 +66,8 @@ const mockUpdate: UpdateApi = (() => {
     restart: async () => {},
     setAutoCheck: async (on) => void (auto = on),
     onAvailable: (cb) => {
-      const t = setTimeout(() => cb(demo), 2500)
+      // Only with ?update in the address, so screenshots of the demo data are not cluttered by it.
+      const t = location.search.includes('update') ? setTimeout(() => cb(demo), 2500) : undefined
       return () => clearTimeout(t)
     },
     openPage: (url) => void window.open(url, '_blank'),

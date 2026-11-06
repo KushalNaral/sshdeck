@@ -154,7 +154,7 @@ function add(path: string, body: string, kind: Version['kind'], author: string, 
   texts.set(id, body)
   vers.push({ id, server: '', path, time: NOW - agoMin * 60_000, author, login, kind, hash: id, size: body.length, ...extra })
 }
-const ME = 'rome@laptop'
+const ME = 'sam@laptop'
 add('/home/deploy/site/public/index.php', "<?php\nrequire 'vendor/autoload.php';\n(new App)->run();\n", 'initial', '', 'deploy', 60 * 24 * 5)
 add('/home/deploy/site/public/index.php', "<?php\ndeclare(strict_types=1);\nrequire 'vendor/autoload.php';\n(new App)->run();\n", 'save', 'sam@desk', 'deploy', 60 * 30, { remote: true })
 add('/home/deploy/site/public/index.php', files.get('/home/deploy/site/public/index.php') ?? '', 'outside', '', 'deploy', 60 * 3)

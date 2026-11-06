@@ -15,7 +15,7 @@ describe('history helpers', () => {
     expect(ago(now - 90 * 86400_000, now)).toMatch(/2026|Aug/)
   })
   it('names who made a change', () => {
-    expect(by(v({ author: 'rome@laptop', login: 'deploy' }))).toBe('rome@laptop as deploy')
+    expect(by(v({ author: 'sam@laptop', login: 'deploy' }))).toBe('sam@laptop as deploy')
     expect(by(v({ kind: 'outside' }))).toBe('someone, outside sshdeck')
     expect(by(v({ kind: 'initial' }))).toBe('before sshdeck')
   })
